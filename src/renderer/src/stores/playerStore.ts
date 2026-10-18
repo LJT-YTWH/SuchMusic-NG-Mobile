@@ -23,6 +23,12 @@ export interface PlayRecord {
   filePath?: string // 本地文件路径（用于从本地重新获取封面等信息）
   timestamp: number
   source?: string // 音源平台标识
+  durationMs?: number // 总时长（毫秒），用于最近播放列表展示与进度条恢复
+}
+
+/** 播放记录的来源类型：本地 / 在线 */
+export function recordKind(r: { filePath?: string; source?: string }): 'local' | 'online' {
+  return r.filePath || r.source === 'local' ? 'local' : 'online'
 }
 
 export type PlaylistSource = 'search' | 'recent' | 'local'
@@ -116,13 +122,14 @@ export const usePlayerStore = defineStore('player', {
       } else if (source === 'local') {
         this.playlist = [...this.localPlaylist]
       } else if (source === 'recent') {
-        // 由最近播放记录构造播放列表，并按歌曲去重（保留最新一条）
-        const seen = new Set<string | number>()
+        // 由最近播放记录构造播放列表，并按「类型 + 歌曲」去重（保留最新一条）
+        const seen = new Set<string>()
         const recentList: PlayerSong[] = []
 
         for (const r of this.playHistory) {
-          if (seen.has(r.songId)) continue
-          seen.add(r.songId)
+          const key = `${recordKind(r)}:${String(r.songId)}`
+          if (seen.has(key)) continue
+          seen.add(key)
 
           recentList.push({
             id: r.songId,
@@ -131,7 +138,9 @@ export const usePlayerStore = defineStore('player', {
             album: r.album,
             cover: r.cover,
             filePath: r.filePath,
-            durationMs: 0
+            durationMs: r.durationMs || 0,
+            source: r.source,
+            sourceSongId: r.source && r.source !== 'local' ? r.songId : undefined
           })
         }
 
@@ -256,13 +265,15 @@ export const usePlayerStore = defineStore('player', {
     recordPlay(song: PlayerSong) {
       if (!song.id) return
 
-      // 避免重复添加相同的最近播放记录（如果最新的一条就是这首歌）
-      if (this.playHistory.length > 0 && this.playHistory[0].songId === song.id) {
-        // 更新时间戳即可
-        this.playHistory[0].timestamp = Date.now()
-        this.saveHistory()
-        return
-      }
+      // 去重：相同类型（本地/在线）且相同歌曲的记录只保留最新一条。
+      // 本地歌曲优先按文件路径匹配，其次按 songId；在线歌曲按 songId 匹配。
+      const songKind = recordKind({ filePath: song.filePath, source: song.source })
+      this.playHistory = this.playHistory.filter((r) => {
+        if (recordKind(r) !== songKind) return true
+        if (String(r.songId) === String(song.id)) return false
+        if (song.filePath && r.filePath && r.filePath === song.filePath) return false
+        return true
+      })
 
       const record: PlayRecord = {
         songId: song.id,
@@ -280,9 +291,10 @@ export const usePlayerStore = defineStore('player', {
         // 保留文件路径，便于“最近播放”等页面按需重新提取本地封面
         filePath: song.filePath,
         timestamp: Date.now(),
-        source: song.source || (song.filePath ? 'local' : 'netease') // 记录来源
+        source: song.source || (song.filePath ? 'local' : 'netease'), // 记录来源
+        durationMs: song.durationMs || 0
       }
-      
+
       this.playHistory.unshift(record)
       
       // 限制历史记录数量，大幅降低上限，例如最近 200 条
@@ -346,6 +358,36 @@ export const usePlayerStore = defineStore('player', {
       this.currentSong = {
         ...this.currentSong,
         durationMs
+      }
+
+      // 回写最近播放记录中的时长，便于历史列表展示与恢复
+      if (durationMs > 0) {
+        const cur = this.currentSong
+        const kind = recordKind({ filePath: cur.filePath, source: cur.source })
+        const idx = this.playHistory.findIndex(
+          (r) => recordKind(r) === kind && String(r.songId) === String(cur.id)
+        )
+        if (idx !== -1 && this.playHistory[idx].durationMs !== durationMs) {
+          this.playHistory[idx].durationMs = durationMs
+          this.saveHistory()
+        }
+      }
+    },
+    // 更新当前歌曲封面（本地音乐封面异步解析完成后同步显示）
+    setCover(cover: string): void {
+      if (!this.currentSong) return
+      this.currentSong = {
+        ...this.currentSong,
+        cover
+      }
+
+      // 同时更新播放列表中对应歌曲的封面
+      const index = this.playlist.findIndex((s) => s.id === this.currentSong?.id)
+      if (index !== -1) {
+        this.playlist[index] = {
+          ...this.playlist[index],
+          cover
+        }
       }
     },
     // 更新当前歌曲歌词

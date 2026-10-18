@@ -205,7 +205,9 @@ export const usePluginStore = defineStore('plugin', () => {
    */
   const activatePlugin = async (pluginId: string): Promise<void> => {
     try {
-      await window.electron.ipcRenderer.invoke('plugin:activate', pluginId)
+      // 注意：桌面/移动端的插件管理器失败时返回 { error } 而不抛异常，必须检查返回值
+      const result = await window.electron.ipcRenderer.invoke('plugin:activate', pluginId)
+      if (result?.error) throw new Error(result.error)
 
       // 更新本地状态
       const plugin = installedPlugins.value.find(p => p.id === pluginId)
@@ -226,7 +228,8 @@ export const usePluginStore = defineStore('plugin', () => {
    */
   const deactivatePlugin = async (pluginId: string): Promise<void> => {
     try {
-      await window.electron.ipcRenderer.invoke('plugin:deactivate', pluginId)
+      const result = await window.electron.ipcRenderer.invoke('plugin:deactivate', pluginId)
+      if (result?.error) throw new Error(result.error)
 
       // 更新本地状态
       const plugin = installedPlugins.value.find(p => p.id === pluginId)
@@ -249,7 +252,8 @@ export const usePluginStore = defineStore('plugin', () => {
    */
   const uninstallPlugin = async (pluginId: string): Promise<void> => {
     try {
-      await window.electron.ipcRenderer.invoke('plugin:uninstall', pluginId)
+      const result = await window.electron.ipcRenderer.invoke('plugin:uninstall', pluginId)
+      if (result?.error) throw new Error(result.error)
 
       // 从本地状态中移除
       const index = installedPlugins.value.findIndex(p => p.id === pluginId)

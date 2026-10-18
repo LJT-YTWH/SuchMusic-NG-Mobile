@@ -1,5 +1,6 @@
 import { webAudioEngine } from '../audio/audio-engine'
 import { usePlayerStore } from '../stores/playerStore'
+import { isNativeMobile } from '../platform'
 
 interface PlayAudioOptions {
   url?: string
@@ -38,11 +39,23 @@ export class AudioPlayerManager {
         const exists = await window.electron.ipcRenderer.invoke('system:fs-exists', filePath)
         if (exists) {
           console.log(`[AudioPlayerManager] ${autoPlay ? 'Playing' : 'Loading'} from local file:`, filePath)
+
+          // 移动端：经 Capacitor 文件桥流式播放（不整文件解码，避免切歌卡顿）
+          if (isNativeMobile) {
+            if (autoPlay) {
+              await webAudioEngine.playFromFilePath(filePath)
+            } else {
+              const { Capacitor } = await import('@capacitor/core')
+              await webAudioEngine.loadFromUrl(Capacitor.convertFileSrc(filePath))
+            }
+            return
+          }
+
           const data = (await window.electron.ipcRenderer.invoke(
             'audio:load-file',
             filePath
           )) as ArrayBuffer
-          
+
           if (autoPlay) {
             await webAudioEngine.playFromFileData(data)
           } else {

@@ -21,9 +21,34 @@ function sendPluginNotice(data: any, pluginName: string) {
   pluginLog.info(`[PluginNotice] ${pluginName}:`, data)
 }
 
+// 无需输出、仅需避免插件报错的 console 方法
+const CONSOLE_NOOP_METHODS = new Set(['groupEnd', 'timeEnd', 'countReset', 'clear', 'timeStamp'])
+
+/**
+ * 将 logger 包装为完整 console：
+ * 洛雪系音源脚本常调用 console.group/table/time 等方法（env != 'mobile' 分支），
+ * 缺失的方法会让插件直接抛 "console.xxx is not a function"。
+ * 有对应方法则透传，结束类方法静默忽略，其余回退为 log。
+ */
+function makeSafeConsole(logger: any): Record<string, unknown> {
+  const fallback = (...args: unknown[]): void => logger.log(...args)
+  const noop = (): void => undefined
+  return new Proxy({} as Record<string, unknown>, {
+    get(_t, prop: string | symbol): unknown {
+      if (typeof prop !== 'string') return undefined
+      const real = logger[prop]
+      if (typeof real === 'function') return real.bind(logger)
+      if (CONSOLE_NOOP_METHODS.has(prop)) return noop
+      return fallback
+    }
+  })
+}
+
 // ==================== 常量定义 ====================
 const CONSTANTS = {
-  DEFAULT_TIMEOUT: 10000, // 10秒超时
+  // 20秒超时：部分洛雪音源托管在 Render 等免费平台，冷启动可达数十秒，
+  // 10s 超时会让首次取链几乎必败；配合播放链路自带的重试可覆盖冷启动窗口
+  DEFAULT_TIMEOUT: 20000,
   API_VERSION: '1.0.3',
   ENVIRONMENT: 'nodejs',
   NOTICE_DELAY: 100, // 通知延迟时间
@@ -334,7 +359,7 @@ class SuchMusicPluginHost {
     const sandbox: any = {
       module: { exports: {} },
       suchmusic: this._getSuchmusicApi(),
-      console: logger,
+      console: makeSafeConsole(logger),
       setTimeout,
       clearTimeout,
       setInterval,
@@ -488,10 +513,16 @@ class SuchMusicPluginHost {
    */
   private _createErrorResult(error: any, url: string): RequestResult {
     const isTimeout = error.name === 'AbortError'
+    const reason = isTimeout ? '请求超时' : error.message || '网络请求失败'
     return {
       body: {
         error: error.name || 'RequestError',
         message: error.message,
+        // 洛雪系脚本普遍以 body.code 判断成败并在失败时抛出 body.msg，
+        // 补齐这两个字段以便把真实网络错误（超时/DNS/连接被拒）透传给用户，
+        // 而不是笼统的 "unknow error"
+        code: -1,
+        msg: `请求失败: ${reason}`,
         url
       },
       statusCode: isTimeout ? 408 : 500,

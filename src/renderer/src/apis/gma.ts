@@ -1,6 +1,9 @@
-import axios from 'axios'
-
-const BASE_URL = 'https://gma.api.enzymeym.top'
+// 原 GMA 聚合搜索服务（gma.api.enzymeym.top）已不可用（502），
+// 本模块已切换到内置网易云 API（api.enzymeym.top，与电脑版一致的内置接口），
+// 保持原有导出签名不变，调用方无需修改。
+import { cloudSearch } from './netease/search/cloudsearch'
+import { fetchNewLyric } from './netease/lyric'
+import type { SearchSong } from './netease/search/cloudsearch'
 
 export interface GMASong {
   id: string
@@ -37,145 +40,88 @@ export interface GMAPlaylist {
   trackCount?: number
 }
 
-interface GMASearchDataRaw {
-  songs: GMASong[]
-  playlists: GMAPlaylist[]
-}
-
 export interface GMASearchResult {
   songs: GMASong[]
   playlists: GMAPlaylist[]
 }
 
+// 内置接口仅提供网易云数据；判断所选平台是否包含网易云
+const includesNetease = (sources?: string[]): boolean =>
+  !sources || sources.length === 0 || sources.some((s) => s === 'wy' || s === 'netease')
+
+const mapSong = (song: SearchSong): GMASong => ({
+  id: String(song.id),
+  name: song.name,
+  artist: (song.ar || []).map((a) => a.name).join('/'),
+  album: song.al?.name || '',
+  cover: song.al?.picUrl ? `${song.al.picUrl}?param=300y300` : '',
+  duration: Math.round((song.dt || 0) / 1000),
+  source: 'wy',
+  url: '',
+  // st === -200 表示无版权
+  is_invalid: song.privilege?.st === -200,
+  link: `https://music.163.com/song?id=${song.id}`
+})
+
+interface NeteasePlaylistRaw {
+  id: number
+  name: string
+  coverImgUrl?: string
+  trackCount?: number
+  playCount?: number
+  creator?: { nickname?: string; avatarUrl?: string }
+}
+
+const mapPlaylist = (pl: NeteasePlaylistRaw): GMAPlaylist => ({
+  id: String(pl.id),
+  name: pl.name,
+  cover: pl.coverImgUrl ? `${pl.coverImgUrl}?param=300y300` : '',
+  link: `https://music.163.com/playlist?id=${pl.id}`,
+  source: 'wy',
+  author: pl.creator ? { name: pl.creator.nickname || '', avatar: pl.creator.avatarUrl } : undefined,
+  playCount: pl.playCount,
+  trackCount: pl.trackCount
+})
+
 export const searchMusic = async (
   keyword: string,
-  _page: number = 1,
-  _limit: number = 30,
+  page: number = 1,
+  limit: number = 30,
   sources?: string[],
   type: 'song' | 'playlist' = 'song'
 ): Promise<GMASearchResult> => {
-  const params = new URLSearchParams()
-  params.append('q', keyword)
-  params.append('type', type)
-  
-  // 映射内部平台代码到 GMA API 代码
-  const mapToApi = (s: string) => {
-    switch (s) {
-      case 'tx': return 'qq'
-      case 'wy': return 'netease'
-      case 'kg': return 'kugou'
-      case 'kw': return 'kuwo'
-      case 'mg': return 'migu'
-      default: return s
-    }
-  }
-
-  if (sources && sources.length > 0) {
-    sources.forEach((s) => params.append('sources', mapToApi(s)))
-  }
-
-  let data: any
-  // 优先尝试使用 Electron 代理请求绕过 CORS
-  if (window.electron && window.electron.ipcRenderer) {
-    try {
-      // 直接将 query string 拼接到 url，避免 Object.fromEntries 导致重复 key (如 sources) 丢失
-      const queryString = params.toString()
-      const result = await window.electron.ipcRenderer.invoke('proxy:request', {
-        url: `${BASE_URL}/api/v1/music/search?${queryString}`,
-        method: 'GET'
-      })
-      if (result.success) {
-        data = result.data
-      } else {
-        console.error('Proxy search failed:', result.error)
-      }
-    } catch (e) {
-      console.error('IPC proxy invoke failed', e)
-    }
-  }
-
-  // 如果代理失败或不可用，回退到普通 axios 请求 (可能遭遇 CORS)
-  if (!data) {
-    const res = await axios.get<GMAResponse<GMASearchDataRaw>>(`${BASE_URL}/api/v1/music/search`, {
-      params
-    })
-    data = res.data
-  }
-
-  // 映射 GMA API 返回的平台代码到内部代码
-  const mapFromApi = (s: string) => {
-    switch (s) {
-      case 'qq': return 'tx'
-      case 'netease': return 'wy'
-      case 'kugou': return 'kg'
-      case 'kuwo': return 'kw'
-      case 'migu': return 'mg'
-      default: return s
-    }
-  }
-
   const result: GMASearchResult = { songs: [], playlists: [] }
+  if (!includesNetease(sources)) return result
 
-  if (data && data.code === 200 && data.data) {
-    if (Array.isArray(data.data.songs)) {
-      result.songs = data.data.songs.map((song: GMASong) => ({
-        ...song,
-        source: mapFromApi(song.source)
-      }))
+  const offset = Math.max(0, (page - 1) * limit)
+  const data = await cloudSearch(keyword, type === 'song' ? 1 : 1000, limit, offset)
+
+  if (data && data.code === 200 && data.result) {
+    if (type === 'song' && Array.isArray(data.result.songs)) {
+      result.songs = data.result.songs.map(mapSong)
     }
-    if (Array.isArray(data.data.playlists)) {
-      result.playlists = data.data.playlists.map((playlist: GMAPlaylist) => ({
-        ...playlist,
-        source: mapFromApi(playlist.source)
-      }))
+    if (type === 'playlist' && Array.isArray(data.result.playlists)) {
+      result.playlists = (data.result.playlists as NeteasePlaylistRaw[]).map(mapPlaylist)
     }
   }
-  
   return result
 }
 
 /**
- * 获取歌词 API
- * GET /api/v1/music/lyric
+ * 获取歌词（内置网易云歌词接口）
  * @param id 音乐 ID
  * @param source 平台
  */
 export const fetchGMALyric = async (id: string, source: string): Promise<string> => {
   try {
-    const params = new URLSearchParams()
-    params.append('id', id)
-    
-    // 适配 GMA 歌词接口：内部代码 -> API 代码
-    let apiSource = source
-    switch (source) {
-      case 'tx': apiSource = 'qq'; break;
-      case 'wy': apiSource = 'netease'; break;
-      case 'kg': apiSource = 'kugou'; break;
-      case 'kw': apiSource = 'kuwo'; break;
-      case 'mg': apiSource = 'migu'; break;
-    }
-    params.append('source', apiSource)
-
-    // 直接在前端发起请求，不使用 IPC 代理
-    const res = await axios.get<GMAResponse<any>>(`${BASE_URL}/api/v1/music/lyric`, {
-      params
-    })
-    
-    const data = res.data
-
+    if (source !== 'wy' && source !== 'netease') return ''
+    const data = await fetchNewLyric(id)
     if (data && data.code === 200) {
-      // API 返回格式可能为 { data: "lyric string" } 或 { data: { lyric: "lyric string" } }
-      // 根据用户提供的日志：data: { lyric: "..." }
-      if (typeof data.data === 'string') {
-        return data.data
-      } else if (data.data && typeof data.data.lyric === 'string') {
-        return data.data.lyric
-      }
-      return ''
+      return data.lrc?.lyric || data.klyric?.lyric || ''
     }
     return ''
   } catch (error) {
-    console.error('Failed to fetch lyric from GMA:', error)
+    console.error('Failed to fetch lyric:', error)
     return ''
   }
 }

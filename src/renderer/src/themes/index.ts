@@ -26,6 +26,12 @@ export function setPrimaryColor(color: string): void {
       primaryColorSuppl: color
     }
   }
+  // 同步到 CSS 变量，让移动端自绘组件（--mp-primary 等）跟随主题色
+  if (typeof document !== 'undefined') {
+    const root = document.documentElement.style
+    root.setProperty('--n-primary-color', color)
+    root.setProperty('--mp-primary', color)
+  }
 }
 
 // 设置全局字体族，作用于 Naive UI 组件

@@ -1,0 +1,54 @@
+/* 移动端平台级修正（设计系统样式见 mobile/theme.css） */
+
+body.is-mobile {
+  min-width: 0 !important;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 移动端由系统字体接管，避免加载 30MB 字体文件；排除图标字体元素 */
+body.is-mobile *:not(i):not([class*='mgc_']):not([class*='icon']) {
+  font-family:
+    system-ui,
+    -apple-system,
+    'PingFang SC',
+    'Noto Sans SC',
+    sans-serif !important;
+}
+
+/* 主内容区不需要避让桌面 Header */
+body.is-mobile .content-container {
+  padding-top: 0 !important;
+  max-width: none !important;
+}
+
+/* ==================== Naive UI 组件适配 ==================== */
+
+body.is-mobile .n-modal,
+body.is-mobile .n-card.n-modal {
+  max-width: calc(100vw - 32px) !important;
+  border-radius: 18px !important;
+  overflow: hidden;
+}
+
+body.is-mobile .n-dialog {
+  max-width: calc(100vw - 48px) !important;
+  border-radius: 18px !important;
+}
+
+body.is-mobile .n-drawer {
+  max-width: 100vw !important;
+}
+
+body.is-mobile .n-data-table {
+  overflow-x: auto;
+}
+
+/* 消息提示不超出屏幕 */
+body.is-mobile .n-message-container {
+  max-width: calc(100vw - 32px) !important;
+}
+
+/* 消息/通知位置避开悬浮底栏 */
+body.is-mobile .n-message-wrapper {
+  bottom: auto !important;
+}

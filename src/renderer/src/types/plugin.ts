@@ -111,6 +111,8 @@ export interface Plugin {
   configUI: PluginConfigItem[]
   /** 插件状态 */
   status: 'uninitialized' | 'active' | 'inactive' | 'error'
+  /** CeruPlugins(window.source) UI 组件插件标记 */
+  isUIWidget?: boolean
   /** 插件配置 */
   config?: Record<string, any>
   /** 错误信息 */
@@ -172,6 +174,58 @@ export interface PluginRuntimeApi {
   getPluginConfig: (pluginId: string, key: string) => Promise<any>
   /** 设置插件配置 */
   setPluginConfig: (pluginId: string, key: string, value: any) => Promise<void>
+}
+
+/**
+ * UI 组件插件（window.source）运行时 API
+ * 由 UI 组件宿主注入沙箱的 suchmusic 对象
+ */
+export interface WidgetPluginApi {
+  /** 环境 */
+  env: string
+  /** API 版本 */
+  version: string
+  /** 工具函数（buffer/crypto） */
+  utils: PluginRuntimeApi['utils']
+  /** Response 风格 fetch */
+  fetch: (url: string, options?: any) => Promise<{
+    ok: boolean
+    status: number
+    headers: Record<string, string>
+    text: () => Promise<string>
+    json: () => Promise<any>
+  }>
+  /** HTTP请求 */
+  request: (url: string, options?: any) => Promise<any>
+  /** 获取应用设置（musicFolder 等） */
+  getSetting: (key: string) => any
+  /** 创建歌单（映射到当前实例的歌单系统） */
+  createPlaylist: (
+    name: string,
+    entries: any[]
+  ) => Promise<{ id: string; name: string; trackCount: number; cover?: string }>
+  /** 获取全部歌单 */
+  getPlaylists: () => Promise<Array<{ id: string; name: string; trackCount: number; cover?: string }>>
+  /** 向歌单追加曲目（自动去重） */
+  addToPlaylist: (playlistId: string, entries: any[]) => Promise<{ success: boolean; added: number }>
+  /** 删除歌单 */
+  removePlaylist: (playlistId: string) => Promise<{ success: boolean }>
+  /** 获取插件配置（支持 (key) 与 (pluginId, key) 两种签名） */
+  getPluginConfig: (a: string, b?: string) => Promise<any>
+  /** 设置插件配置（支持 (key, value) 与 (pluginId, key, value) 两种签名） */
+  setPluginConfig: (a: string, b: any, c?: any) => Promise<void>
+  /** 下载文件到本地 */
+  downloadFile: (url: string, path: string) => Promise<{ success: boolean; path: string }>
+  /** 文件操作 */
+  fileOp: (op: string, ...args: any[]) => Promise<any>
+  /** 执行外部程序（移动端 ncmdump 重定向到内置引擎） */
+  execProgram: (program: string, args?: string[]) => Promise<{ code: number; stdout: string; stderr: string }>
+  /** 执行终端命令（移动端仅放行 ncmdump 相关命令） */
+  execTerminal: (command: string) => Promise<string>
+  /** 打开面板 */
+  openPanel: () => void
+  /** 通知中心 */
+  NoticeCenter: (type: string, data: any) => void
 }
 
 /**

@@ -88,7 +88,63 @@ export function parseLrc(lrcContent: string): LyricLine[] {
     return validLyricLines;
 }
 
+const wordTagRegex = /<(\d{1,2}):(\d{1,2})(?:[.:](\d{1,3}))?>/g;
+
+function wordTagToMs(match: RegExpExecArray): number {
+    const minutes = parseInt(match[1], 10);
+    const seconds = parseInt(match[2], 10);
+    const fractionStr = match[3] || "0";
+    const milliseconds = parseInt(fractionStr.padEnd(3, "0"), 10);
+    return minutes * 60 * 1000 + seconds * 1000 + milliseconds;
+}
+
+/**
+ * 解析增强（逐字）LRC 行：<mm:ss.xx>词<mm:ss.xx>词...<mm:ss.xx>
+ * 最后一个时间标签为行结束标记。词文本保持原样（含词间空格 token）。
+ */
+function parseEnhancedWords(text: string, fallbackEndTime: number): { words: LyricWord[]; endTime: number } | null {
+    wordTagRegex.lastIndex = 0;
+    const tags: Array<{ ms: number; start: number; end: number }> = [];
+    let m: RegExpExecArray | null;
+    while ((m = wordTagRegex.exec(text)) !== null) {
+        tags.push({ ms: wordTagToMs(m), start: m.index, end: m.index + m[0].length });
+    }
+    if (tags.length < 2) return null;
+    const words: LyricWord[] = [];
+    for (let i = 0; i < tags.length - 1; i++) {
+        const w = newLyricWord();
+        w.word = text.slice(tags[i].end, tags[i + 1].start);
+        w.startTime = tags[i].ms;
+        w.endTime = tags[i + 1].ms;
+        words.push(w);
+    }
+    // 末标签之后的残余文本（异常格式兜底）
+    const tail = text.slice(tags[tags.length - 1].end);
+    let endTime = tags[tags.length - 1].ms;
+    if (tail.length > 0) {
+        const w = newLyricWord();
+        w.word = tail;
+        w.startTime = endTime;
+        w.endTime = Math.max(fallbackEndTime, endTime);
+        words.push(w);
+        endTime = w.endTime;
+    }
+    return { words, endTime };
+}
+
 function createBasicLyricLine(text: string, startTime: number, endTime: number): LyricLine {
+    // 逐字（增强）LRC：行内含 <mm:ss.xx> 词级时间标签
+    if (text.includes("<")) {
+        const enhanced = parseEnhancedWords(text, endTime);
+        if (enhanced && enhanced.words.length > 0) {
+            const line = newLyricLine();
+            line.words = enhanced.words;
+            line.startTime = startTime;
+            line.endTime = Math.max(enhanced.endTime, startTime);
+            return line;
+        }
+    }
+
     const line = newLyricLine();
     const word = newLyricWord();
 

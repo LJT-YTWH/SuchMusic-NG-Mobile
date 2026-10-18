@@ -98,9 +98,19 @@ function extractSourcesSummary(
         log: (...args: unknown[]) => void
         warn: (...args: unknown[]) => void
         error: (...args: unknown[]) => void
+        info: (...args: unknown[]) => void
+        debug: (...args: unknown[]) => void
+        group: (...args: unknown[]) => void
+        groupCollapsed: (...args: unknown[]) => void
+        groupEnd: () => void
+        table: (...args: unknown[]) => void
+        dir: (...args: unknown[]) => void
+        trace: (...args: unknown[]) => void
+        time: (...args: unknown[]) => void
+        timeEnd: () => void
       }
       suchmusic: {
-        request: (..._args: unknown[]) => Promise<never>
+        request: (..._args: unknown[]) => unknown
         utils: {
           buffer: unknown
           crypto: {
@@ -126,12 +136,32 @@ function extractSourcesSummary(
       console: {
         log: (...args: unknown[]) => pushLog('log', args),
         warn: (...args: unknown[]) => pushLog('warn', args),
-        error: (...args: unknown[]) => pushLog('error', args)
+        error: (...args: unknown[]) => pushLog('error', args),
+        info: (...args: unknown[]) => pushLog('log', args),
+        debug: (...args: unknown[]) => pushLog('log', args),
+        group: (...args: unknown[]) => pushLog('log', args),
+        groupCollapsed: (...args: unknown[]) => pushLog('log', args),
+        groupEnd: () => {},
+        table: (...args: unknown[]) => pushLog('log', args),
+        dir: (...args: unknown[]) => pushLog('log', args),
+        trace: (...args: unknown[]) => pushLog('log', args),
+        time: (...args: unknown[]) => pushLog('log', args),
+        timeEnd: () => {}
       },
       suchmusic: {
-        // 请求在概要解析阶段不可用，避免真正发网请求
-        request: async () => {
-          throw new Error('suchmusic.request is disabled in Snowdrop summary')
+        // 请求在概要解析阶段不可用，避免真正发网请求。
+        // 回调式调用必须通过回调返回错误：若直接返回被拒绝的 Promise，
+        // 插件只注册回调不消费返回值，会产生未处理的 Promise 拒绝
+        request: (...args: unknown[]) => {
+          const err = new Error('suchmusic.request is disabled in Snowdrop summary')
+          const cb = args.find((a) => typeof a === 'function') as
+            | ((e: Error, r: null) => void)
+            | undefined
+          if (cb) {
+            cb(err, null)
+            return undefined
+          }
+          return Promise.reject(err)
         },
         utils: {
           buffer: {},
@@ -227,9 +257,10 @@ function extractSourcesSummary(
             musicInfo: unknown,
             quality: string
           ) => Promise<unknown>
-          // 不等待返回值，仅用于触发同步日志输出
+          // 不等待返回值，仅用于触发同步日志输出；
+          // 概要阶段网络被禁用，musicUrl 必然拒绝，吞掉避免未处理的 Promise 拒绝
           // eslint-disable-next-line @typescript-eslint/no-floating-promises
-          invokeMusicUrl(testSource, fakeMusicInfo, '128k')
+          invokeMusicUrl(testSource, fakeMusicInfo, '128k').catch(() => {})
         }
       }
     } catch {

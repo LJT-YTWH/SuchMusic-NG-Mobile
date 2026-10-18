@@ -6,15 +6,25 @@ import { usePlaylistStore } from '../../stores/playlistStore'
 import defaultCover from '@renderer/assets/icon.png'
 import { webAudioEngine } from '../../audio/audio-engine'
 import PlayerPage from './PlayerPage.vue'
+import MobilePlayerPage from '../../mobile/views/MobilePlayerPage.vue'
+import MobileKaraokeOverlay from '../../mobile/components/MobileKaraokeOverlay.vue'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useDesktopLyric } from '../../composables/useDesktopLyric'
 import { useTaskbarLyric } from '../../composables/useTaskbarLyric'
-import { runSnowdropGetMusicUrl } from '../../apis/snowdrop-transform'
+import { runSnowdropGetMusicUrl, NO_ACTIVE_SOURCE_PLUGIN_MSG } from '../../apis/snowdrop-transform'
 import { fetchGMALyric } from '../../apis/gma'
 import { AudioPlayerManager } from '../../utils/audioPlayerManager'
+import { isNativeMobile } from '../../platform'
 
 const themeVars = useThemeVars()
 const message = useMessage()
+
+// 在线播放失败时，若为「未配置音源插件」，向用户弹出引导提示
+const notifyIfNoSourcePlugin = (e: unknown): void => {
+  if (String((e as any)?.message || e || '').includes(NO_ACTIVE_SOURCE_PLUGIN_MSG)) {
+    message.warning('用户未配置音源，请前往我的-设置-音源与插件中配置')
+  }
+}
 
 // 简单混合两个十六进制颜色，用于活跃列表项背景过渡
 const mixHexColor = (color1: string, color2: string, weight: number): string => {
@@ -54,6 +64,18 @@ const { isOpen: isTaskbarLyricOpen, toggle: toggleTaskbarLyric, init: initTaskba
 onMounted(() => {
   initTaskbarLyric()
 })
+
+// 将歌曲来源映射为插件/歌词接口使用的源标识（与在线播放流程保持一致）
+const resolveLyricSource = (song: PlayerSong): string => {
+  switch (song.source) {
+    case 'netease': return 'wy'
+    case 'qq': return 'tx'
+    case 'kugou': return 'kg'
+    case 'kuwo': return 'kw'
+    case 'migu': return 'mg'
+    default: return song.source || 'wy'
+  }
+}
 
 // 歌词重试获取函数
 const fetchLyricWithRetry = async (id: string, source: string): Promise<string> => {
@@ -112,6 +134,12 @@ const loadAndPlaySong = async (song: PlayerSong, forcePlay: boolean = false) => 
   // 如果是不自动播放（恢复状态），则保留进度
   if (shouldPlay) {
     player.setPosition(0)
+    // 标记加载中：在线歌曲需要等待「下载到缓存目录」完成后才真正出声，
+    // 期间进度条必须保持为 0 不动
+    player.isLoading = true
+    // 立即停止上一首的播放与进度上报，避免下载等待期间
+    // 旧歌曲的进度计时器继续推动新歌曲的进度条
+    void webAudioEngine.fadeOutAndStop(200)
   }
 
   const currentProcessId = song.id
@@ -126,8 +154,21 @@ const loadAndPlaySong = async (song: PlayerSong, forcePlay: boolean = false) => 
       // 尝试加载本地歌词（如果缺失）
       if (!song.lyrics) {
         window.electron.ipcRenderer.invoke('local-music:get-meta', (song as any).filePath).then((meta: any) => {
-          if (meta && meta.lyrics && player.currentSong?.id === song.id) {
+          if (player.currentSong?.id !== song.id) return
+          if (meta && meta.lyrics) {
             player.setLyrics(meta.lyrics)
+            return
+          }
+          // 本地（含旁挂 .lrc）无歌词：若该曲目带有在线身份（如「我喜欢」中收藏
+          // 的在线歌曲、歌单导入曲目），回退到在线歌词接口获取
+          const onlineId = song.sourceSongId
+          const lyricSource = resolveLyricSource(song)
+          if (onlineId && lyricSource !== 'local') {
+            fetchLyricWithRetry(String(onlineId), lyricSource).then(lyric => {
+              if (lyric && player.currentSong?.id === song.id) {
+                player.setLyrics(lyric)
+              }
+            }).catch(e => console.warn('Failed to fetch online lyric for local file:', e))
           }
         }).catch(err => {
           console.warn('Failed to load local lyrics:', err)
@@ -265,8 +306,10 @@ const loadAndPlaySong = async (song: PlayerSong, forcePlay: boolean = false) => 
           }
 
           // 更新当前歌曲的 filePath，以便后续使用
+          // 注意：引擎可能已通过 onloadedmetadata 写入了真实时长，不能被 song.durationMs（可能为 0）覆盖
           const updatedSong: PlayerSong = {
             ...song,
+            durationMs: player.currentSong?.durationMs || song.durationMs || 0,
             filePath: cacheFilePath,
             source: song.source,
             sourceSongId: song.sourceSongId
@@ -401,7 +444,8 @@ const loadAndPlaySong = async (song: PlayerSong, forcePlay: boolean = false) => 
         artist: song.artist,
         album: song.album,
         cover: song.cover,
-        durationMs: song.durationMs,
+        // 优先保留引擎已解析出的真实时长（onloadedmetadata 可能先于此处执行）
+        durationMs: player.currentSong?.durationMs || song.durationMs || 0,
         filePath: cacheFilePath || undefined,
         source: song.source,
         sourceSongId: song.sourceSongId,
@@ -414,6 +458,7 @@ const loadAndPlaySong = async (song: PlayerSong, forcePlay: boolean = false) => 
       }
     } catch (e) {
       console.error('[PlayerBar] 获取并播放在线歌曲失败:', e)
+      notifyIfNoSourcePlugin(e)
     }
   }
 
@@ -552,7 +597,7 @@ const loadAndPlaySong = async (song: PlayerSong, forcePlay: boolean = false) => 
         artist: song.artist || (target.ar || []).map((a: any) => a.name).join(' / ') || '未知歌手',
         album: song.album || target.al?.name || '未知专辑',
         cover: song.cover || target.al?.picUrl || '',
-        durationMs: song.durationMs || target.dt || 0,
+        durationMs: player.currentSong?.durationMs || song.durationMs || target.dt || 0,
         filePath: cacheFilePath || undefined,
         source: 'netease',
         sourceSongId: neteaseId,
@@ -565,6 +610,7 @@ const loadAndPlaySong = async (song: PlayerSong, forcePlay: boolean = false) => 
       }
     } catch (e) {
       console.error('[PlayerBar][SearchFallback] 搜索并播放歌曲失败:', e)
+      notifyIfNoSourcePlugin(e)
     }
   }
 }
@@ -574,11 +620,17 @@ const loadAndPlaySong = async (song: PlayerSong, forcePlay: boolean = false) => 
 watch(() => player.currentSong, async (newSong, oldSong) => {
   if (newSong && newSong.id !== oldSong?.id) {
      await loadAndPlaySong(newSong)
+     // 加载流程结束（成功/失败/被放弃），若仍是当前歌曲则解除加载标记
+     if (player.currentSong?.id === newSong.id) {
+       player.isLoading = false
+     }
   }
 })
 
 // 播放 / 暂停切换
 const togglePlay = async () => {
+  // 下载缓存进行中：不响应播放/暂停，避免重复触发加载流程
+  if (player.isLoading) return
   if (player.isPlaying) {
     await webAudioEngine.pause()
     player.setPlaying(false)
@@ -601,6 +653,30 @@ const togglePlay = async () => {
     }
   }
 }
+
+// 响应「重新加载并播放当前歌曲」全局事件：
+// 应用重启恢复状态后，引擎内没有任何音频源，直接 play() 无效，需要完整重载
+const handleReplayCurrent = async (): Promise<void> => {
+  const song = player.currentSong
+  if (!song) return
+  const resumePos = player.positionMs
+  await loadAndPlaySong(song, true)
+  if (player.currentSong?.id === song.id) {
+    player.isLoading = false
+  }
+  // 恢复到退出前的播放进度
+  if (resumePos > 1000 && player.currentSong?.id === song.id) {
+    webAudioEngine.seek(resumePos)
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('player:replay-current', handleReplayCurrent)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('player:replay-current', handleReplayCurrent)
+})
 
 // 切歌
 const handlePrev = () => {
@@ -1051,8 +1127,13 @@ watch(showPlaylist, (val) => {
 </script>
 
 <template>
-  <div class="player-bar">
-    <PlayerPage @open-playlist="openPlaylist" />
+  <!-- 播放页（全屏覆盖层）：移动端使用重做的 MobilePlayerPage -->
+  <MobilePlayerPage v-if="isNativeMobile" />
+  <!-- 逐字歌词生成全局遮罩（移动端） -->
+  <MobileKaraokeOverlay v-if="isNativeMobile" />
+  <PlayerPage v-else @open-playlist="openPlaylist" />
+  <!-- 桌面端播放栏（移动端使用 MobilePlayerBar 替代，本组件仅保留播放逻辑与播放页） -->
+  <div v-if="!isNativeMobile" class="player-bar">
     <!-- Progress Bar (Top) -->
     <div class="progress-wrapper" @mousedown="startDrag" @touchstart="startDrag">
       <n-slider
@@ -1102,7 +1183,7 @@ watch(showPlaylist, (val) => {
         ></n-button>
         <n-button strong circle secondary style="width: 44px; height: 44px" @click="togglePlay">
           <n-icon size="22">
-            <i :class="player.isPlaying ? 'mgc_pause_line' : 'mgc_play_fill'"></i>
+            <i :class="player.isLoading ? 'mgc_refresh_2_line pb-spin' : player.isPlaying ? 'mgc_pause_line' : 'mgc_play_fill'"></i>
           </n-icon>
         </n-button>
         <n-button strong circle quaternary class="control-btn" @click="handleNext"
@@ -1275,6 +1356,18 @@ html[data-theme='dark'] .player-bar {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+/* 下载缓存等待中的旋转加载图标 */
+.pb-spin {
+  display: inline-block;
+  animation: pb-spin-rotate 1s linear infinite;
+}
+
+@keyframes pb-spin-rotate {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 :deep(.n-slider .n-slider-rail) {

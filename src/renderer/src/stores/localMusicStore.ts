@@ -95,8 +95,23 @@ export const useLocalMusicStore = defineStore('localMusic', {
         
         if (!targets.length) return
 
-        await Promise.all(
-          targets.map(async (song) => {
+        // 限制并发，避免大量文件同时读取导致内存溢出（移动端尤为重要）
+        const CONCURRENCY = 3
+        const runWithLimit = async (
+          items: LocalSong[],
+          worker: (song: LocalSong) => Promise<void>
+        ): Promise<void> => {
+          let index = 0
+          const runners = Array.from({ length: Math.min(CONCURRENCY, items.length) }, async () => {
+            while (index < items.length) {
+              const current = items[index++]
+              await worker(current)
+            }
+          })
+          await Promise.all(runners)
+        }
+
+        await runWithLimit(targets, async (song) => {
             if (!song.filePath) return
             try {
               // @ts-ignore
@@ -129,11 +144,9 @@ export const useLocalMusicStore = defineStore('localMusic', {
                 const coverUrl = `data:${result.cover.mimeType};base64,${result.cover.base64}`
                 song.picUrl = coverUrl
 
-                if (playerStore.currentSong?.id === song.id) {
-                    // Update cover if needed, but playerStore doesn't expose a direct setCover method for currentSong easily 
-                    // except by replacing the object or relying on reactivity if we mutated the object passed to it.
-                    // But playerStore.currentSong is a separate object usually.
-                    // We can try to update it manually if needed, but let's leave it for now or implement a helper in playerStore.
+                // 正在播放这首歌且尚未显示封面：解析完成后同步更新播放页/迷你条封面
+                if (playerStore.currentSong?.id === song.id && !playerStore.currentSong.cover) {
+                  playerStore.setCover(coverUrl)
                 }
               }
 
@@ -170,8 +183,7 @@ export const useLocalMusicStore = defineStore('localMusic', {
             } catch (error) {
               console.error('读取歌曲 meta 失败', song.filePath, error)
             }
-          })
-        )
+        })
       } finally {
         this.fillingMeta = false
       }

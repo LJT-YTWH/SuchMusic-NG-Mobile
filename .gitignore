@@ -13,3 +13,22 @@ native
 src/renderer/src/utils/supabase.ts
 .figma
 .vscode
+
+# ===== 安卓移动端（社区版）=====
+# 构建产物（可再生成）
+dist-mobile
+android/app/build
+android/build
+android/.gradle
+android/capacitor-cordova-android-plugins
+android/app/src/main/assets/public
+android/local.properties
+*.apk
+core.*
+tsconfig.web.tsbuildinfo
+
+# 签名材料：严禁提交（发布包请通过 android/keystore.properties 本地配置）
+android/app/suchmusic-release.keystore
+android/keystore.properties
+*.keystore
+*.jks

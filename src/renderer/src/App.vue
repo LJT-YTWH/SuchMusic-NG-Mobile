@@ -15,6 +15,8 @@ import {
 // 引入 highlight.js 提供代码高亮能力
 import hljs from 'highlight.js'
 import { themeOverridesRef, setPrimaryColor } from './themes'
+import { isNativeMobile } from './platform'
+import { updateMediaMetadata, updateMediaPlayback } from './platform/mobile/mediaSession'
 import { useSettingsStore } from './stores/settingsStore'
 import { usePlayerStore } from './stores/playerStore'
 import { useAutoNaiveTheme } from './themes/autoNaiveTheme'
@@ -84,16 +86,24 @@ watch(
 onMounted(() => {
   if (!isDesktopLyric.value) {
     window.electron.ipcRenderer.on('player:control', (_, action: string) => {
+      // 媒体通知/灵动岛进度拖拽：seekto:<毫秒>
+      if (typeof action === 'string' && action.startsWith('seekto:')) {
+        const pos = Number(action.slice(7))
+        if (Number.isFinite(pos) && pos >= 0) {
+          import('./audio/audio-engine').then(({ webAudioEngine }) => {
+            webAudioEngine.seek(pos)
+          })
+        }
+        return
+      }
       switch (action) {
         case 'play':
           if (!playerStore.isPlaying) {
-            // We need to access the togglePlay function from PlayerBar or implement it globally
-            // Since PlayerBar logic is inside component, we should probably expose it or move to store/composable
-            // But for now, we can use the webAudioEngine directly if we import it
             import('./audio/audio-engine').then(async ({ webAudioEngine }) => {
               if (playerStore.currentSong) {
-                await webAudioEngine.play()
-                playerStore.setPlaying(true)
+                const ok = await webAudioEngine.play()
+                if (ok) playerStore.setPlaying(true)
+                else window.dispatchEvent(new CustomEvent('player:replay-current'))
               }
             })
           }
@@ -112,8 +122,9 @@ onMounted(() => {
               await webAudioEngine.pause()
               playerStore.setPlaying(false)
             } else if (playerStore.currentSong) {
-              await webAudioEngine.play()
-              playerStore.setPlaying(true)
+              const ok = await webAudioEngine.play()
+              if (ok) playerStore.setPlaying(true)
+              else window.dispatchEvent(new CustomEvent('player:replay-current'))
             }
           })
           break
@@ -130,6 +141,46 @@ onMounted(() => {
     })
   }
 })
+
+// 移动端：同步系统媒体通知（锁屏/通知栏控制）
+if (isNativeMobile) {
+  watch(
+    () => playerStore.currentSong,
+    (song) => {
+      if (song) {
+        void updateMediaMetadata({
+          title: song.title || '',
+          artist: song.artist || '',
+          album: song.album || '',
+          coverUrl: song.cover || '',
+          durationMs: song.durationMs ?? 0
+        })
+      }
+    },
+    { immediate: true, deep: false }
+  )
+  watch(
+    () => [playerStore.isPlaying, playerStore.currentSong?.durationMs] as const,
+    () => {
+      void updateMediaPlayback({
+        playing: playerStore.isPlaying,
+        positionMs: playerStore.positionMs,
+        durationMs: playerStore.currentSong?.durationMs ?? 0
+      })
+    },
+    { immediate: true }
+  )
+  // 定期同步进度（用于通知栏进度显示）
+  setInterval(() => {
+    if (playerStore.isPlaying) {
+      void updateMediaPlayback({
+        playing: true,
+        positionMs: playerStore.positionMs,
+        durationMs: playerStore.currentSong?.durationMs ?? 0
+      })
+    }
+  }, 5000)
+}
 
 const testingSnowdrop = ref(false)
 const snowdropResults = ref<SnowdropTransformTestResult[]>([])
@@ -218,6 +269,11 @@ const handleOpenSourceSettings = () => {
       }
     })
   )
+}
+
+// 移动端：初始化逐字歌词服务（切歌自动应用/生成）
+if (isNativeMobile) {
+  void import('./utils/karaoke/karaokeService').then((m) => m.initKaraokeService())
 }
 
 // 自动加载所有插件

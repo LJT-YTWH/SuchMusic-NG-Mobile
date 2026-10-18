@@ -1,202 +1,139 @@
 <div align="center">
 
-<img src="build/icon.png" alt="SuchMusic-NG Icon" width="128">
+<img src="build/icon.png" alt="SuchMusic Icon" width="128">
 
-## Such Music for PC
+## SuchMusic 社区版（Android）
 
-[![GitHub License](https://img.shields.io/github/license/Enzymeym/SuchMusic-NG?color=red&label=License&logo=agpl)](https://github.com/Enzymeym/SuchMusic-NG/blob/main/LICENSE)
-[![Electron](https://img.shields.io/badge/Electron-32.x-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
-[![Vue 3](https://img.shields.io/badge/Vue-3.x-4FC08D?logo=vuedotjs&logoColor=white)](https://vuejs.org/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-9cf?logo=windows&logoColor=white)](https://electronjs.org/)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/Enzymeym/SuchMusic-NG/pulls)
-[![Beta](https://img.shields.io/badge/status-BETA-yellow?logo=github)](https://github.com/Enzymeym/SuchMusic-NG)
+**基于 [SuchMusic-NG](https://github.com/Enzymeym/SuchMusic-NG)（PC 版）移植的安卓移动端**
 
-**一款简洁、美观的跨平台音乐播放器，提供优雅的桌面音乐体验。**
-
-基于 Vue 3 + Electron + TypeScript 构建，采用模块化插件架构，支持自定义音乐源、歌词渲染与可视化背景。
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-red.svg)](./LICENSE)
+[![Platform](https://img.shields.io/badge/Platform-Android-green.svg)]()
+[![Vue 3](https://img.shields.io/badge/Vue-3.x-4FC68D.svg)]()
+[![Capacitor](https://img.shields.io/badge/Capacitor-8.x-119EFF.svg)]()
 
 </div>
 
 ---
 
-## ⚖️ 法律声明
+## ⚖️ 开源协议与版权声明（必读）
 
-> **本软件为本地音乐播放器**
-> **仅提供插件拓展框架与播放功能，**  
-> **不直接存储、提供任何音乐源文件。**  
-> 用户需通过自行下载音乐。  
-> 项目旨在为开发者提供桌面应用实践与学习案例，  
-> 为用户提供合规的音乐播放工具。
+本项目是 **[SuchMusic-NG](https://github.com/Enzymeym/SuchMusic-NG)**（作者：**酶游明 / [@Enzymeym](https://github.com/Enzymeym)**）的**衍生作品**，
+遵循原项目协议，同样以 **[GNU AGPL-3.0](./LICENSE)** 开源。
 
----
-> [!IMPORTANT]
->
->请务必遵守 **GNU Affero General Public License (AGPL-3.0)** 许可协议：
->
->- 在您的修改、演绎、分发或派生项目中，**必须同样采用 AGPL-3.0 许可协议**，并在适当的位置包含本项目的许可和版权信息。
->- 若您用于售卖或其他盈利用途，**必须提供本项目的源代码及原项目链接**。另外由于本项目涉及第三方，售卖后可能遭受法律或诉讼风险。
->- 如若发现违反许可协议，作者保留追究法律责任的权利。
->- **禁止在二开项目中修改程序原版权信息**（您可以添加二开作者信息）。
+- 完整保留原项目的版权与许可信息，详见 [NOTICE](./NOTICE)
+- 原项目地址：<https://github.com/Enzymeym/SuchMusic-NG>
+- 安卓社区版作者：**柠檬桶 / [@LJT-YTWH](https://github.com/LJT-YTWH)**
+- 依据 AGPL-3.0：任何修改、分发或衍生项目**必须同样采用 AGPL-3.0**，并提供完整源代码
 
->感谢您的尊重与理解。
-
-### 开发环境要求
-
-- **技术栈**：Vue 3 + TypeScript + Naive UI + Electron
-- **Node.js 版本**：`>= 20`
-- **包管理器**：`pnpm >= 10`
-
-### 平台支持
-
-- 由于设备有限，目前仅保证 **Windows** 系统的适配，其他平台如遇问题可以提 Issue，或自行解决后提 PR。
-
-### 欢迎 Star
-
-欢迎各位大佬 **😍 Star** 支持！
+> **二次开发请勿移除程序内的原项目信息与版权声明，可另行添加二开作者信息。**
 
 ---
 
-## 📦 技术架构
+## ✨ 简介
 
-| 技术栈 | 说明 |
-|--------|------|
-| **Vue 3** | 前端框架 |
-| **TypeScript** | 类型安全的开发体验 |
-| **Electron** | 跨平台桌面应用框架 |
-| **Naive UI** | 基于 Vue 3 的组件库 |
-| **Pinia** | 轻量级状态管理 |
-| **Vite** | 现代化的前端构建工具 |
-| **AMLL** | 流体背景渲染与歌词组件 |
-| **Such Plugin** | 高扩展性的插件运行环境 |
-| **Rodium** | 基于 ffmpeg 和 wasapi 的音频播放器，使用 Rust 编写 |
+将原 Electron 桌面版完整移植到 Android 平台（Capacitor 8 + WebView），在保留原项目
+插件化音源、播放器、歌词等能力的基础上，新增：
 
----
-
-## ✨ 功能特性
-
-- 🎵 **优雅的音乐播放体验** — 简洁美观的界面设计，专注音乐本身
-- 🔌 **插件化架构** — 支持自定义功能扩展，灵活可控
-- 🎨 **流体视觉背景** — 基于 WebGL 的动态视觉效果，增强沉浸感
-- 📜 **歌词同步显示** — 支持多种歌词格式解析与实时同步
-- 🖥️ **跨平台支持** — 基于 Electron，覆盖 Windows / macOS / Linux
-- 🧩 **可扩展性强** — 模块化设计，便于二次开发与功能集成
+- 📱 **移动端界面**：竖屏 / 横屏双布局，全屏播放页、手势切页、迷你播放条
+- 🎤 **逐字歌词生成**：基于音频强制对齐（V3 / V4 两套算法，纯 DSP + 动态规划），
+  将逐行 LRC 转换为逐字卡拉 OK 歌词，支持翻译行与词间空格保留
+- 🎛 **逐字歌词管理**：开关、自动生成、生成时机、生成完后播放位置、
+  算法选择；生成文件持久化于应用私有目录，支持在设置页批量删除
+- 🎚 **播放增强**：均衡器、响度均衡、变速、声像/立体声扩展、人声消除等
+- 🌐 **插件化音源**：沿用原项目的落雪插件体系，支持用户自配音源
 
 ---
 
-## 📸 预览
+## 🧱 技术栈
 
-> *应用截图待补充*
+| 层 | 技术 |
+| --- | --- |
+| 渲染层 | Vue 3 + TypeScript + Vite + Naive UI |
+| 移动端容器 | Capacitor 8（Android） |
+| 音频 | Web Audio API（解码 / 处理 / 播放） |
+| 歌词 | AMLL 歌词组件 + 自研逐字对齐算法 |
+| 桌面端 | Electron（保留原项目桌面端代码） |
 
 ---
 
-## 🚀 快速开始
+## 📦 构建（Android）
 
-### 环境要求
-
-- Node.js >= 20
-- pnpm >= 10
-
-### 安装与运行
+环境要求：Node.js ≥ 20、JDK 21、Android SDK（compileSdk 36）。
 
 ```bash
-# 克隆项目
-git clone https://github.com/Enzymeym/SuchMusic-NG.git
-cd SuchMusic-NG
+# 1. 安装依赖
+npm install
 
-# 安装依赖
-pnpm install
+# 2. 构建移动端 Web 资源
+NODE_OPTIONS=--max-old-space-size=1536 npx vite build --config vite.config.mobile.ts
 
-# 启动开发环境
-pnpm run dev
+# 3. 同步到 Android 工程
+npx cap sync android
+
+# 4. 打包
+cd android && ./gradlew assembleRelease
 ```
+
+产物：`android/app/build/outputs/apk/release/app-release.apk`
+
+### 关于签名
+
+签名密钥与密码**不会随源码发布**。如需产出可覆盖安装的正式包：
+
+1. 将你的 keystore 放到 `android/app/suchmusic-release.keystore`
+2. 在 `android/keystore.properties` 填写：
+
+```properties
+storeFile=suchmusic-release.keystore
+storePassword=你的密码
+keyAlias=你的别名
+keyPassword=你的密码
+```
+
+未提供该文件时，构建产出**未签名**的 release 包（仅用于调试）。
+
+> 内存受限环境（如 4GB 容器）构建注意事项见 [构建内存限制问题排查记录](构建内存限制问题排查记录.md)。
 
 ---
 
-## 🛠️ 开发指南
-
-### 项目结构
+## 📁 目录结构（移动端相关）
 
 ```
-SuchMusic-NG/
-├── src/               # 主应用源码
-├── native/            # 原生模块（含 Rodium）
-├── build/             # 构建配置
-├── resources/         # 资源文件
-├── packages/          # 子包（如 lyric-kit）
-└── ...
+├── android/                       # Capacitor Android 工程
+├── src/renderer/src/mobile/       # 移动端界面（播放页、设置、组件）
+├── src/renderer/src/platform/     # 平台桥接（移动端 IPC / 文件 / 原生能力）
+├── src/renderer/src/utils/karaoke/# 逐字歌词算法（V3/V4）与存储管理
+├── vite.config.mobile.ts          # 移动端构建配置
+├── capacitor.config.ts            # Capacitor 配置
+└── README-PC.md                   # 原项目（PC 版）README 存档
 ```
-
-### 插件开发
-
-项目提供插件运行环境，允许开发者扩展音乐源功能。如需开发插件，请参考后续插件开发文档。
-
-> ⚠️ 插件仅提供框架接口，不包含任何默认音乐插件。
-
-### 常用命令
-
-```bash
-pnpm run dev          # 启动开发服务器
-pnpm run build        # 构建生产版本
-pnpm run preview      # 预览构建结果
-pnpm run lint         # 代码检查
-```
-
----
-
-## 📦 构建与打包
-
-使用 Electron Builder 构建桌面应用：
-
-```bash
-pnpm run build
-```
-
-构建产物将输出至 `dist/` 目录。
-
----
-
-## 🤝 贡献指南
-
-欢迎提交 Issue 和 Pull Request。
-
-在提交 PR 前，请确保：
-
-- 代码通过 ESLint 检查
-- 遵循项目的代码规范
-- 为新增功能编写必要的文档
 
 ---
 
 ## 👥 开发者
 
-（排名不分先后，以下内容实时更新，更新日期：2026.6.8）
-
-- **酶游明** ([GitHub](https://github.com/Enzymeym)) — 插件系统、音频系统、UI 设计/开发
+- **酶游明** ([@Enzymeym](https://github.com/Enzymeym)) — 原项目 SuchMusic-NG（PC 版）：插件系统、音频系统、UI 设计/开发
+- **柠檬桶** ([@LJT-YTWH](https://github.com/LJT-YTWH)) — 安卓社区版：移动端移植、逐字歌词算法移植与功能开发
 
 ---
 
 ## 📄 开源协议
 
-本项目采用 [AGPL v3](https://github.com/Enzymeym/SuchMusic-NG/blob/main/LICENSE) 开源协议。
-
----
-
-## 💬 交流与反馈
-
-如有问题或建议，欢迎通过 GitHub Issues 进行反馈。
-
----
-
-## 📌 后续计划
-
-- [ ] 完善插件开发文档
-- [ ] 增加更多主题与自定义选项
+[GNU AGPL-3.0](./LICENSE)（与原项目一致）。分发或修改本项目的衍生作品必须同样以 AGPL-3.0 开源。
 
 ---
 
 ## 🙏 致谢
 
+- [SuchMusic-NG](https://github.com/Enzymeym/SuchMusic-NG) — 原项目
 - [AMLL](https://github.com/amll-dev/applemusic-like-lyrics) — 歌词与流体背景组件
-- [Naive UI](https://www.naiveui.com) — 优雅的 Vue 3 组件库
-- [Electron](https://www.electronjs.org) — 跨平台桌面应用框架
+- [Naive UI](https://www.naiveui.com) — Vue 3 组件库
+- [Capacitor](https://capacitorjs.com) — 移动端容器
+- [Electron](https://www.electronjs.org) — 桌面端框架
+
+---
+
+## ⚠️ 免责声明
+
+本应用仅提供音乐搜索与播放工具，不存储任何版权音乐内容。所有音源均来自用户自行配置的
+插件与公开接口，请于下载后 24 小时内删除相关内容，支持正版音乐。

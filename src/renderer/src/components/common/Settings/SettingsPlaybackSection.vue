@@ -2,9 +2,13 @@
 import { computed } from 'vue'
 import { NCard, NSwitch, NSlider, NButton } from 'naive-ui'
 import { useSettingsStore } from '../../../stores/settingsStore'
+import { FX_FEATURES, useAdvancedFx } from '../../../composables/useAdvancedFx'
 
 // 使用设置仓库，驱动播放设置选项
 const settingsStore = useSettingsStore()
+
+// 高级音效：开关（含首次开启确认弹窗）与恢复默认
+const { isEnabled, toggleFeature, statusText, confirmReset } = useAdvancedFx()
 
 const props = defineProps<{
   settingItemBgColor: string
@@ -229,6 +233,151 @@ const applyEqPreset = (id: string) => {
             <div class="time-text">{{ eqBandValues[idx].value }} dB</div>
           </div>
         </div>
+      </div>
+    </n-card>
+
+    <div class="section-group-title">高级音效</div>
+
+    <n-card
+      v-for="feature in FX_FEATURES"
+      :key="feature.id"
+      class="setting-item"
+      :bordered="true"
+      size="small"
+      :style="{
+        backgroundColor: props.settingItemBgColor,
+        borderColor: props.settingItemBorderColor
+      }"
+    >
+      <div class="setting-row" style="flex-direction: column; align-items: stretch; gap: 10px">
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px">
+          <div class="setting-label">
+            <div class="main-label">{{ feature.name }}</div>
+            <div class="sub-label">{{ feature.desc }}</div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 10px; flex-shrink: 0">
+            <span class="time-text">{{ statusText(feature.id) }}</span>
+            <n-switch
+              :value="isEnabled(feature.id)"
+              @update:value="toggleFeature(feature.id, $event)"
+            />
+          </div>
+        </div>
+
+        <!-- 变速播放 -->
+        <template v-if="feature.id === 'rate' && settingsStore.advancedFx.rateEnabled">
+          <div style="display: flex; align-items: center; gap: 12px">
+            <n-slider
+              :value="settingsStore.advancedFx.playbackRate"
+              :min="0.5"
+              :max="2"
+              :step="0.05"
+              :tooltip="false"
+              style="flex: 1"
+              @update:value="settingsStore.advancedFx.playbackRate = $event"
+            />
+            <span class="time-text" style="min-width: 48px; text-align: right">
+              {{ settingsStore.advancedFx.playbackRate.toFixed(2) }}×
+            </span>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: space-between">
+            <span class="time-text">保持音调（仅对流式播放有效）</span>
+            <n-switch
+              size="small"
+              :value="settingsStore.advancedFx.preservePitch"
+              @update:value="settingsStore.advancedFx.preservePitch = $event"
+            />
+          </div>
+        </template>
+
+        <!-- 响度均衡 -->
+        <template v-if="feature.id === 'loudness' && settingsStore.advancedFx.loudnessEnabled">
+          <div style="display: flex; align-items: center; gap: 12px">
+            <n-slider
+              :value="settingsStore.advancedFx.loudnessStrength * 100"
+              :min="0"
+              :max="100"
+              :step="5"
+              :tooltip="false"
+              style="flex: 1"
+              @update:value="settingsStore.advancedFx.loudnessStrength = $event / 100"
+            />
+            <span class="time-text" style="min-width: 48px; text-align: right">
+              {{ Math.round(settingsStore.advancedFx.loudnessStrength * 100) }}%
+            </span>
+          </div>
+        </template>
+
+        <!-- 声像平衡 -->
+        <template v-if="feature.id === 'balance' && settingsStore.advancedFx.balanceEnabled">
+          <div style="display: flex; align-items: center; gap: 12px">
+            <span class="time-text">左</span>
+            <n-slider
+              :value="settingsStore.advancedFx.balance * 100"
+              :min="-100"
+              :max="100"
+              :step="5"
+              :tooltip="false"
+              style="flex: 1"
+              @update:value="settingsStore.advancedFx.balance = $event / 100"
+            />
+            <span class="time-text">右</span>
+          </div>
+        </template>
+
+        <!-- 立体声扩展 -->
+        <template v-if="feature.id === 'width' && settingsStore.advancedFx.widthEnabled">
+          <div style="display: flex; align-items: center; gap: 12px">
+            <n-slider
+              :value="settingsStore.advancedFx.stereoWidth * 100"
+              :min="0"
+              :max="200"
+              :step="5"
+              :tooltip="false"
+              style="flex: 1"
+              @update:value="settingsStore.advancedFx.stereoWidth = $event / 100"
+            />
+            <span class="time-text" style="min-width: 48px; text-align: right">
+              {{ Math.round(settingsStore.advancedFx.stereoWidth * 100) }}%
+            </span>
+          </div>
+        </template>
+
+        <!-- 交叉淡入淡出 -->
+        <template v-if="feature.id === 'crossfade' && settingsStore.advancedFx.crossfadeEnabled">
+          <div style="display: flex; align-items: center; gap: 12px">
+            <n-slider
+              :value="settingsStore.advancedFx.crossfadeSeconds"
+              :min="1"
+              :max="12"
+              :step="1"
+              :tooltip="false"
+              style="flex: 1"
+              @update:value="settingsStore.advancedFx.crossfadeSeconds = $event"
+            />
+            <span class="time-text" style="min-width: 48px; text-align: right">
+              {{ settingsStore.advancedFx.crossfadeSeconds }} 秒
+            </span>
+          </div>
+        </template>
+      </div>
+    </n-card>
+
+    <n-card
+      class="setting-item"
+      :bordered="true"
+      size="small"
+      :style="{
+        backgroundColor: props.settingItemBgColor,
+        borderColor: props.settingItemBorderColor
+      }"
+    >
+      <div class="setting-row">
+        <div class="setting-label">
+          <div class="main-label">恢复默认</div>
+          <div class="sub-label">将全部高级音效一键恢复为默认设置</div>
+        </div>
+        <n-button secondary type="warning" @click="confirmReset">恢复默认</n-button>
       </div>
     </n-card>
   </div>

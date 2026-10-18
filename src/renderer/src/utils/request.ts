@@ -17,13 +17,17 @@ const service: AxiosInstance = axios.create({
 // 请求拦截器
 service.interceptors.request.use(
   (config) => {
-    // 可以在这里添加 token 等
-    // const token = localStorage.getItem('token')
-    // if (token) {
-    //   config.headers['Authorization'] = `Bearer ${token}`
-    // }
-    
-    // 如果是 GET 请求且有参数，处理参数（可选）
+    // 附加网易云登录 Cookie（扫码登录后保存于 localStorage）。
+    // 移动端经 CapacitorHttp 原生栈发送（自定义头不受限）；
+    // 桌面端 Chromium 会静默丢弃该受限头，由浏览器 Cookie 罐维持会话
+    try {
+      const cookie = localStorage.getItem('netease_music_cookie')
+      if (cookie) {
+        ;(config.headers as Record<string, string>)['Cookie'] = cookie
+      }
+    } catch {
+      // ignore
+    }
     return config
   },
   (error) => {

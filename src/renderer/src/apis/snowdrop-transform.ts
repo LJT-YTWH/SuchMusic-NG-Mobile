@@ -44,6 +44,9 @@ const CHANNEL_SNOWDROP_REMOVE = 'snowdrop:plugin:remove'
 const CHANNEL_SNOWDROP_SET_ACTIVE = 'snowdrop:plugin:set-active'
 const CHANNEL_SNOWDROP_GET_MUSIC_URL = 'snowdrop:plugin:get-music-url'
 
+// 主进程在「未配置/未激活音源插件」时抛出的错误特征（桌面端与移动端一致）
+export const NO_ACTIVE_SOURCE_PLUGIN_MSG = '未设置激活的音源插件'
+
 // 调用主进程的落雪插件转换测试 IPC
 export async function runSnowdropTransformTest(): Promise<SnowdropTransformTestResult> {
   const result = await window.electron.ipcRenderer.invoke(CHANNEL_SNOWDROP_TEST)
@@ -131,6 +134,10 @@ export async function runSnowdropGetMusicUrl(
 
     } catch (error) {
       console.error(`[Snowdrop] 获取音乐链接出错 (尝试 ${i + 1}/${retryCount + 1}):`, error)
+      // 未配置音源插件属于确定性错误，立即抛出，不再重试
+      if (String((error as any)?.message || error || '').includes(NO_ACTIVE_SOURCE_PLUGIN_MSG)) {
+        throw new Error(NO_ACTIVE_SOURCE_PLUGIN_MSG)
+      }
       lastError = error
     }
   }

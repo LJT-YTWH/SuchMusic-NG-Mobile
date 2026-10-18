@@ -1,0 +1,46 @@
+SuchMusic 社区版（Android 移动端）
+================================
+
+本仓库是以下原项目的**衍生作品（移植版）**，按 GNU Affero General Public License v3.0
+（AGPL-3.0）发布。原始版权信息保留如下：
+
+原项目：Such Music for PC（SuchMusic-NG）
+原作者：酶游明（GitHub: @Enzymeym）
+原项目地址：https://github.com/Enzymeym/SuchMusic-NG
+原项目协议：GNU Affero General Public License v3.0
+原始许可全文见本仓库 LICENSE 文件（未作任何修改）。
+
+二开（安卓社区版）作者：柠檬桶（GitHub: @LJT-YTWH）
+二开说明：将原 Electron 桌面版移植为 Android 移动端（Capacitor 8 + WebView），
+         并新增移动端界面、逐字歌词生成与管理系统等功能。
+
+依据 AGPL-3.0 第 5 条，本衍生作品：
+  1. 同样以 AGPL-3.0 协议开源，完整源代码随本仓库提供；
+  2. 保留原项目的版权声明与许可信息（本 NOTICE、LICENSE、程序内「关于」页面的原项目信息）；
+  3. 在程序「设置 → 关于」中保留原项目地址与原作者信息，并标注本移植版本号；
+  4. 明确列出对原项目的修改（见下）。
+
+对原项目的主要修改
+------------------
+- 新增移动端运行平台（Capacitor 8 / Android WebView），补充平台桥接层
+  （src/renderer/src/platform/）；
+- 新增移动端界面与交互（src/renderer/src/mobile/、MobileLayout 等）；
+- 新增逐字歌词生成算法（V3/V4，TypeScript 移植）与逐字歌词存储/管理
+  （src/renderer/src/utils/karaoke/）；
+- 新增 Android 原生工程（android/）与移动端构建配置（vite.config.mobile.ts、
+  capacitor.config.ts）；
+- 对播放器、歌词解析、设置存储等模块的移动端适配修改。
+
+第三方组件与协议
+----------------
+- Apple Music Like Lyrics (AMLL) — AGPL-3.0
+  https://github.com/amll-dev/applemusic-like-lyrics
+- Naive UI — MIT
+- Vue 3 / Vite / TypeScript — MIT
+- Capacitor — MIT
+- Electron — MIT（桌面端保留）
+
+免责声明
+--------
+本项目仅为音乐播放工具与插件框架，不存储、不提供任何音乐内容。音源由用户自行配置的
+插件与公开接口提供，请遵守当地法律法规并支持正版音乐。
