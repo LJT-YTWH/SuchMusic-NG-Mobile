@@ -60,7 +60,8 @@ const activeKey = computed(() => {
 })
 
 // 沉浸式页面（歌单详情、设置子页）隐藏底栏，内容全屏
-const immersiveRoutes = ['online-playlist', 'settings-section']
+// 本地歌单详情与在线歌单详情保持一致的全屏排版（否则会多叠一层状态栏安全区）
+const immersiveRoutes = ['online-playlist', 'playlist-detail', 'settings-section']
 const isImmersive = computed(() => immersiveRoutes.includes(route.name as string))
 </script>
 

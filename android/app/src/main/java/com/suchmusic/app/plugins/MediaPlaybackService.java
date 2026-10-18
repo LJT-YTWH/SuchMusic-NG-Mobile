@@ -13,9 +13,11 @@ import android.media.AudioManager;
 import android.media.MediaMetadata;
 import android.media.session.MediaSession;
 import android.media.session.PlaybackState;
+import android.net.Uri;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
+import android.util.Base64;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
@@ -23,6 +25,7 @@ import androidx.core.app.NotificationCompat;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 
 /**
  * 前台媒体播放服务：
@@ -154,35 +157,123 @@ public class MediaPlaybackService extends Service {
         }
     }
 
-    private void loadCoverAsync(String url) {
+    private void loadCoverAsync(final String url) {
         new Thread(() -> {
-            Bitmap bmp = null;
-            try {
-                HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
-                conn.setConnectTimeout(8000);
-                conn.setReadTimeout(8000);
-                // 注入常见防盗链 Referer
-                if (url.contains("126.net") || url.contains("163.com")) {
-                    conn.setRequestProperty("Referer", "https://music.163.com/");
-                } else if (url.contains("qpic.cn") || url.contains("gtimg.cn")) {
-                    conn.setRequestProperty("Referer", "https://y.qq.com/");
-                } else if (url.contains("kugou.com")) {
-                    conn.setRequestProperty("Referer", "https://www.kugou.com/");
-                } else if (url.contains("kuwo.cn")) {
-                    conn.setRequestProperty("Referer", "https://www.kuwo.cn/");
-                } else if (url.contains("hdslb.com") || url.contains("bilibili.com")) {
-                    conn.setRequestProperty("Referer", "https://www.bilibili.com/");
-                } else if (url.contains("migu.cn")) {
-                    conn.setRequestProperty("Referer", "https://music.migu.cn/");
-                }
-                InputStream in = conn.getInputStream();
-                bmp = BitmapFactory.decodeStream(in);
-                in.close();
-            } catch (Exception ignored) {}
+            Bitmap bmp = decodeCover(url);
             coverBitmap = bmp;
             pushMetadata(bmp);
-            updateNotification();
+            // 封面到位后重新推送通知，避免状态栏媒体胶囊沿用应用图标
+            startForegroundWithNotification();
         }).start();
+    }
+
+    /**
+     * 解码封面。支持：
+     * - data:image/xxx;base64,...（本地歌曲内嵌封面，Web 端就是这种形式）
+     * - file:///...、/storage/...（本地文件）
+     * - content://...
+     * - Capacitor 的 http(s)://localhost/_capacitor_file_/... / _capacitor_content_/...
+     * - 普通 http(s) 封面（带常见防盗链 Referer）
+     */
+    private Bitmap decodeCover(String url) {
+        if (url == null || url.isEmpty()) return null;
+        try {
+            if (url.startsWith("data:")) {
+                int comma = url.indexOf(',');
+                if (comma < 0) return null;
+                String meta = url.substring(5, comma);
+                String payload = url.substring(comma + 1);
+                byte[] bytes = meta.contains(";base64")
+                    ? Base64.decode(payload, Base64.DEFAULT)
+                    : payload.getBytes(StandardCharsets.UTF_8);
+                return decodeBytes(bytes);
+            }
+            if (url.startsWith("content://")) {
+                return decodeStream(getContentResolver().openInputStream(Uri.parse(url)));
+            }
+            int contentIdx = url.indexOf("_capacitor_content_");
+            if (contentIdx >= 0) {
+                String raw = url.substring(contentIdx + "_capacitor_content_".length());
+                return decodeStream(getContentResolver().openInputStream(Uri.parse("content://" + raw)));
+            }
+            String path = null;
+            if (url.startsWith("file://")) {
+                path = Uri.parse(url).getPath();
+            } else if (url.startsWith("/")) {
+                path = url;
+            } else {
+                int fileIdx = url.indexOf("_capacitor_file_");
+                if (fileIdx >= 0) {
+                    path = url.substring(fileIdx + "_capacitor_file_".length());
+                }
+            }
+            if (path != null) return decodeFile(path);
+            return decodeRemote(url);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private Bitmap decodeBytes(byte[] bytes) {
+        if (bytes == null || bytes.length == 0) return null;
+        BitmapFactory.Options opts = new BitmapFactory.Options();
+        opts.inJustDecodeBounds = true;
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.length, opts);
+        opts.inSampleSize = calcInSampleSize(opts, 1024);
+        opts.inJustDecodeBounds = false;
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.length, opts);
+    }
+
+    private Bitmap decodeStream(InputStream in) {
+        if (in == null) return null;
+        try {
+            return BitmapFactory.decodeStream(in);
+        } catch (Throwable ignored) {
+            return null;
+        } finally {
+            try { in.close(); } catch (Throwable ignored) {}
+        }
+    }
+
+    private Bitmap decodeFile(String path) {
+        BitmapFactory.Options opts = new BitmapFactory.Options();
+        opts.inJustDecodeBounds = true;
+        BitmapFactory.decodeFile(path, opts);
+        opts.inSampleSize = calcInSampleSize(opts, 1024);
+        opts.inJustDecodeBounds = false;
+        return BitmapFactory.decodeFile(path, opts);
+    }
+
+    private Bitmap decodeRemote(String url) {
+        try {
+            HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+            conn.setConnectTimeout(8000);
+            conn.setReadTimeout(8000);
+            // 注入常见防盗链 Referer
+            if (url.contains("126.net") || url.contains("163.com")) {
+                conn.setRequestProperty("Referer", "https://music.163.com/");
+            } else if (url.contains("qpic.cn") || url.contains("gtimg.cn")) {
+                conn.setRequestProperty("Referer", "https://y.qq.com/");
+            } else if (url.contains("kugou.com")) {
+                conn.setRequestProperty("Referer", "https://www.kugou.com/");
+            } else if (url.contains("kuwo.cn")) {
+                conn.setRequestProperty("Referer", "https://www.kuwo.cn/");
+            } else if (url.contains("hdslb.com") || url.contains("bilibili.com")) {
+                conn.setRequestProperty("Referer", "https://www.bilibili.com/");
+            } else if (url.contains("migu.cn")) {
+                conn.setRequestProperty("Referer", "https://music.migu.cn/");
+            }
+            return decodeStream(conn.getInputStream());
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private static int calcInSampleSize(BitmapFactory.Options opts, int target) {
+        int size = Math.max(opts.outWidth, opts.outHeight);
+        int sample = 1;
+        while (size / sample > target * 2) sample *= 2;
+        return Math.max(1, sample);
     }
 
     private void pushMetadata(Bitmap cover) {
@@ -193,7 +284,10 @@ public class MediaPlaybackService extends Service {
             .putString(MediaMetadata.METADATA_KEY_ALBUM, album)
             .putLong(MediaMetadata.METADATA_KEY_DURATION, durationMs);
         if (cover != null) {
-            builder.putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, cover);
+            // 各 ROM「灵动岛 / 焦点通知 / 流体云」取图键位不同，全部写入
+            builder.putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, cover)
+                .putBitmap(MediaMetadata.METADATA_KEY_ART, cover)
+                .putBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON, cover);
         }
         mediaSession.setMetadata(builder.build());
     }

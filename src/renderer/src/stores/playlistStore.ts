@@ -32,6 +32,21 @@ interface PlaylistState {
 
 const STORAGE_KEY = 'user_playlists'
 
+/** 判断两条歌单曲目是否为同一首歌（id 或 平台+平台ID 匹配） */
+function sameTrack(a: PlaylistTrack, b: PlaylistTrack): boolean {
+  if (a.id && b.id && String(a.id) === String(b.id)) return true
+  if (
+    a.source &&
+    b.source === a.source &&
+    a.sourceSongId &&
+    b.sourceSongId &&
+    String(a.sourceSongId) === String(b.sourceSongId)
+  ) {
+    return true
+  }
+  return false
+}
+
 export const usePlaylistStore = defineStore('playlist', {
   state: (): PlaylistState => ({
     playlists: []
@@ -126,6 +141,61 @@ export const usePlaylistStore = defineStore('playlist', {
         this.saveToStorage()
       }
     },
+    /** 曲目是否已在指定歌单中 */
+    isTrackInPlaylist(playlistId: string, track: PlaylistTrack): boolean {
+      const pl = this.playlists.find((p) => p.id === playlistId)
+      if (!pl) return false
+      return pl.tracks.some((t) => sameTrack(t, track))
+    },
+
+    /** 添加歌曲到指定歌单（去重）；返回 added / exists / notfound */
+    addTrackToPlaylist(
+      playlistId: string,
+      track: PlaylistTrack
+    ): 'added' | 'exists' | 'notfound' {
+      const pl = this.playlists.find((p) => p.id === playlistId)
+      if (!pl) return 'notfound'
+      if (pl.tracks.some((t) => sameTrack(t, track))) return 'exists'
+      pl.tracks.unshift(track)
+      if (!pl.cover && track.cover) pl.cover = track.cover
+      pl.updatedAt = Date.now()
+      this.saveToStorage()
+      return 'added'
+    },
+
+    /** 从指定歌单移除歌曲；返回是否真的移除 */
+    removeTrackFromPlaylist(playlistId: string, track: PlaylistTrack): boolean {
+      const pl = this.playlists.find((p) => p.id === playlistId)
+      if (!pl) return false
+      const before = pl.tracks.length
+      pl.tracks = pl.tracks.filter((t) => !sameTrack(t, track))
+      if (pl.tracks.length === before) return false
+      pl.updatedAt = Date.now()
+      this.saveToStorage()
+      return true
+    },
+
+    /** 把歌曲从一个歌单移动到另一个歌单；返回 moved / exists / notfound */
+    moveTrackToPlaylist(
+      track: PlaylistTrack,
+      fromPlaylistId: string,
+      toPlaylistId: string
+    ): 'moved' | 'exists' | 'notfound' {
+      if (fromPlaylistId === toPlaylistId) return 'exists'
+      const from = this.playlists.find((p) => p.id === fromPlaylistId)
+      const to = this.playlists.find((p) => p.id === toPlaylistId)
+      if (!from || !to) return 'notfound'
+      if (to.tracks.some((t) => sameTrack(t, track))) return 'exists'
+      from.tracks = from.tracks.filter((t) => !sameTrack(t, track))
+      to.tracks.unshift(track)
+      if (!to.cover && track.cover) to.cover = track.cover
+      const now = Date.now()
+      from.updatedAt = now
+      to.updatedAt = now
+      this.saveToStorage()
+      return 'moved'
+    },
+
     toggleFavorite(track: PlaylistTrack): boolean {
       const fav = this.playlists.find((p) => p.id === 'favorite')
       if (!fav) return false

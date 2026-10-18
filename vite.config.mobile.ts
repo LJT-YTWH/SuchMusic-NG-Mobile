@@ -39,7 +39,7 @@ export default defineConfig(({ mode }) => {
       // 降低内存占用（受限容器环境）
       reportCompressedSize: false,
       rollupOptions: {
-        maxParallelFileOps: 8
+        maxParallelFileOps: 2
       }
     }
   }

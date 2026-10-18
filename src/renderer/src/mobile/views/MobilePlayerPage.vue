@@ -3,7 +3,7 @@ import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { NSlider, NSpin, NEmpty, NSwitch, useMessage, useDialog } from 'naive-ui'
 import { Filesystem, Encoding } from '@capacitor/filesystem'
 import { usePlayerStore } from '../../stores/playerStore'
-import { usePlaylistStore } from '../../stores/playlistStore'
+import { usePlaylistStore, type PlaylistTrack } from '../../stores/playlistStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { webAudioEngine } from '../../audio/audio-engine'
 import { parseLyricsToCore } from '../../utils/lyric/lyricParser'
@@ -133,31 +133,71 @@ const handleSeek = (percent: number): void => {
   player.setPosition(target)
 }
 
-// ==================== 收藏 ====================
+// ==================== 添加到本地歌单 ====================
 
-const isFavorite = computed(() => {
-  if (!song.value) return false
-  return playlistStore.isFavorite({
-    id: song.value.id,
-    source: song.value.source,
-    sourceSongId: song.value.sourceSongId
-  } as never)
-})
+const showAddPlaylist = ref(false)
+const newPlaylistName = ref('')
+const creatingPlaylist = ref(false)
 
-const toggleFavorite = (): void => {
+/** 当前播放歌曲 → 歌单曲目 */
+function currentTrack(): PlaylistTrack | null {
+  const s = song.value
+  if (!s) return null
+  return {
+    id: s.id,
+    title: s.title,
+    artist: s.artist,
+    album: s.album,
+    cover: s.cover,
+    filePath: s.filePath,
+    durationMs: s.durationMs,
+    source: s.source,
+    sourceSongId: s.sourceSongId
+  }
+}
+
+function openAddToPlaylist(): void {
+  showActions.value = false
   if (!song.value) return
-  const added = playlistStore.toggleFavorite({
-    id: song.value.id,
-    title: song.value.title,
-    artist: song.value.artist,
-    album: song.value.album,
-    cover: song.value.cover,
-    filePath: song.value.filePath,
-    durationMs: song.value.durationMs,
-    source: song.value.source,
-    sourceSongId: song.value.sourceSongId
-  })
-  message.success(added ? '已加入收藏' : '已取消收藏')
+  playlistStore.loadFromStorage()
+  newPlaylistName.value = ''
+  creatingPlaylist.value = false
+  showAddPlaylist.value = true
+}
+
+function inPlaylist(playlistId: string): boolean {
+  const t = currentTrack()
+  return t ? playlistStore.isTrackInPlaylist(playlistId, t) : false
+}
+
+function addToPlaylist(playlistId: string): void {
+  const t = currentTrack()
+  if (!t) return
+  const pl = playlistStore.playlists.find((p) => p.id === playlistId)
+  const r = playlistStore.addTrackToPlaylist(playlistId, t)
+  if (r === 'added') message.success(`已添加到「${pl?.name || '歌单'}」`)
+  else if (r === 'exists') message.info('这首歌已在该歌单中')
+  else message.error('歌单不存在')
+  showAddPlaylist.value = false
+}
+
+function createPlaylistAndAdd(): void {
+  const name = newPlaylistName.value.trim()
+  const t = currentTrack()
+  if (!name) {
+    message.info('请输入歌单名称')
+    return
+  }
+  if (!t) return
+  try {
+    const pl = playlistStore.createPlaylistFromTracks(name, [t], t.cover)
+    message.success(`已创建「${pl.name}」并添加`)
+    showAddPlaylist.value = false
+    newPlaylistName.value = ''
+    creatingPlaylist.value = false
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : '创建失败')
+  }
 }
 
 // ==================== 歌词数据 ====================
@@ -628,11 +668,6 @@ const openMiniLyric = async (): Promise<void> => {
   }
 }
 
-const doFavorite = (): void => {
-  showActions.value = false
-  toggleFavorite()
-}
-
 // 横屏「更多」弹窗内的完整功能入口（竖屏这些在底栏，横屏收纳进弹窗）
 const doToggleMode = (): void => {
   // 菜单保持打开，播放模式标签实时更新
@@ -1070,9 +1105,9 @@ watch(
         <div class="sheet-grabber"></div>
         <div class="sheet-title">更多</div>
         <div class="action-list">
-          <div class="action-item" @click="doFavorite">
-            <i :class="isFavorite ? 'mgc_heart_fill' : 'mgc_heart_line'"></i>
-            <span>{{ isFavorite ? '取消收藏' : '收藏这首歌' }}</span>
+          <div class="action-item" @click="openAddToPlaylist">
+            <i class="mgc_playlist_line"></i>
+            <span>添加到本地歌单</span>
           </div>
           <div class="action-item" @click="openLyricSheet">
             <i class="mgc_quill_pen_line"></i>
@@ -1091,6 +1126,43 @@ watch(
             <span>高级</span>
           </div>
           <div class="action-item cancel" @click="showActions = false">
+            <span>取消</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 添加到本地歌单弹层 -->
+      <div v-if="showAddPlaylist" class="mp-sheet-mask" @click="showAddPlaylist = false"></div>
+      <div v-if="showAddPlaylist" class="mp-sheet">
+        <div class="sheet-grabber"></div>
+        <div class="sheet-title">添加到本地歌单</div>
+        <div v-if="creatingPlaylist" class="new-pl-form">
+          <input
+            v-model="newPlaylistName"
+            class="new-pl-input"
+            placeholder="请输入歌单名称"
+            @keyup.enter="createPlaylistAndAdd"
+          />
+          <button class="new-pl-btn" @click="createPlaylistAndAdd">创建并添加</button>
+        </div>
+        <div class="action-list">
+          <div
+            v-for="pl in playlistStore.playlists"
+            :key="pl.id"
+            class="action-item"
+            @click="addToPlaylist(pl.id)"
+          >
+            <i :class="pl.id === 'favorite' ? 'mgc_heart_fill' : 'mgc_playlist_line'"></i>
+            <span class="action-flex">{{ pl.name }}</span>
+            <span class="pl-track-count">{{ pl.tracks.length }} 首</span>
+            <i v-if="inPlaylist(pl.id)" class="mgc_check_fill pl-checked"></i>
+            <i v-else class="mgc_add_line pl-add"></i>
+          </div>
+          <div v-if="!creatingPlaylist" class="action-item" @click="creatingPlaylist = true">
+            <i class="mgc_add_line"></i>
+            <span>新建歌单并添加</span>
+          </div>
+          <div class="action-item cancel" @click="showAddPlaylist = false">
             <span>取消</span>
           </div>
         </div>
@@ -1336,11 +1408,9 @@ watch(
             <span class="ls-more-icon"><i class="mgc_list_check_2_line"></i></span>
             <span class="ls-more-label">播放队列</span>
           </button>
-          <button class="ls-more-item" @click="doFavorite">
-            <span class="ls-more-icon" :class="{ active: isFavorite }">
-              <i :class="isFavorite ? 'mgc_heart_fill' : 'mgc_heart_line'"></i>
-            </span>
-            <span class="ls-more-label">{{ isFavorite ? '取消收藏' : '收藏' }}</span>
+          <button class="ls-more-item" @click="openAddToPlaylist">
+            <span class="ls-more-icon"><i class="mgc_playlist_line"></i></span>
+            <span class="ls-more-label">添加到歌单</span>
           </button>
           <button class="ls-more-item" @click="openFloatingLyric">
             <span class="ls-more-icon"><i class="mgc_text_line"></i></span>
@@ -1976,6 +2046,59 @@ watch(
   color: var(--mp-text-3, rgba(60, 60, 67, 0.33));
   margin-left: auto;
   margin-right: 2px;
+}
+
+/* ===== 添加到歌单 ===== */
+.pl-track-count {
+  font-size: 12px;
+  color: var(--mp-text-3, rgba(60, 60, 67, 0.33));
+  margin-left: auto;
+  margin-right: 4px;
+}
+
+.pl-checked {
+  color: var(--mp-success, #30d158);
+  font-size: 18px;
+}
+
+.pl-add {
+  color: var(--mp-text-3, rgba(60, 60, 67, 0.33));
+  font-size: 18px;
+}
+
+.new-pl-form {
+  display: flex;
+  gap: 10px;
+  padding: 0 18px 12px;
+}
+
+.new-pl-input {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  border: none;
+  outline: none;
+  border-radius: 12px;
+  padding: 0 12px;
+  font-size: 14px;
+  color: var(--mp-text, #1c1c1e);
+  background: var(--mp-fill, rgba(120, 120, 128, 0.12));
+}
+
+.new-pl-btn {
+  flex-shrink: 0;
+  height: 40px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 12px;
+  background: var(--mp-primary, #2c8efd);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.new-pl-btn:active {
+  opacity: 0.8;
 }
 
 .action-item .danger-text {

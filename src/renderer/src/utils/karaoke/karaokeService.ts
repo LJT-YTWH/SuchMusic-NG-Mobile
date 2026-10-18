@@ -233,23 +233,28 @@ async function autoGenerate(
   const lrc = await waitLineLyrics(songId, 20000)
   if (token !== genToken || !lrc) return
   if (settings.karaoke.genMode === 'afterDone') {
-    // 等生成完再播放：先暂停，生成应用后从头播放
+    // 等生成完再播放：先暂停，生成应用后按「生成完后」设置恢复
     const player = usePlayerStore()
     await waitLoaded(30000)
     if (token !== genToken) return
     const wasPlaying = player.isPlaying
+    const resumeAt = player.positionMs
     if (wasPlaying) {
       await webAudioEngine.pause()
       player.setPlaying(false)
     }
     const ok = await generateAndSave(filePath, title, artist, settings.karaoke.lastAlgo, true, token)
     if (token !== genToken) return
+    if (ok && settings.karaoke.afterGenPlay === 'restart') {
+      // 从头播放
+      webAudioEngine.seek(0)
+      player.setPosition(0)
+    } else if (wasPlaying) {
+      // 接着播放：显式回到生成前的位置，避免暂停/恢复期间的漂移
+      webAudioEngine.seek(resumeAt)
+      player.setPosition(resumeAt)
+    }
     if (wasPlaying) {
-      // 生成成功且偏好「从头播放」时才回到 0；「接着播放」/生成失败/取消均从暂停处继续
-      if (ok && settings.karaoke.afterGenPlay === 'restart') {
-        webAudioEngine.seek(0)
-        player.setPosition(0)
-      }
       const played = await webAudioEngine.play()
       if (played) player.setPlaying(true)
     }
@@ -281,7 +286,20 @@ export async function generateForCurrentSong(algo: KaraokeAlgo): Promise<boolean
   }
   settings.karaoke.lastAlgo = algo
   const token = ++genToken
-  return generateAndSave(song.filePath, song.title || '', song.artist || '', algo, true, token)
+  const wasPlaying = player.isPlaying
+  const ok = await generateAndSave(song.filePath, song.title || '', song.artist || '', algo, true, token)
+  if (!ok) return false
+  // 手动生成同样遵循「生成完后」设置（restart=从头播放 continue=接着播放）
+  if (player.currentSong?.filePath !== song.filePath) return true
+  if (settings.karaoke.afterGenPlay === 'restart') {
+    webAudioEngine.seek(0)
+    player.setPosition(0)
+  }
+  if (wasPlaying && !player.isPlaying) {
+    const played = await webAudioEngine.play()
+    if (played) player.setPlaying(true)
+  }
+  return true
 }
 
 async function generateAndSave(
