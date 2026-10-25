@@ -60,7 +60,7 @@
 
 前往 [Releases](https://github.com/LJT-YTWH/SuchMusic-NG-Mobile/releases) 下载最新 APK：
 
-- 最新：`SuchMusic-1.5.1-android.apk`（应用内版本 V1.5.2 / versionCode 8）
+- 最新：`SuchMusic-1.5.2-android.apk`（versionName 1.5.2 / versionCode 8）
 - 系统要求：Android 7.0（API 24）及以上
 - 使用同一个社区版签名，可直接覆盖安装旧版本；签名不一致时会安装失败
 
@@ -68,7 +68,7 @@
 
 | 版本 | 说明 |
 | --- | --- |
-| **v1.5.1** | 1.5 系列完整更新：底栏胶囊 UI、横屏 Cover Flow、AI 歌词翻译、歌曲下载、浅色模式适配、横屏界面重做（1.4.0 未单独发布，内容已并入本版本） |
+| **v1.5.2** | 1.5 系列完整更新：底栏胶囊 UI、横屏 Cover Flow、AI 歌词翻译、歌曲下载、浅色模式适配、横屏界面重做（1.5.0 / 1.5.1 的改动一并包含；1.4.0 未单独发布，内容也已并入本版本） |
 | v1.3.1 | 本地歌单增强、横屏抽屉修复、逐字歌词生成时机修复、通知栏封面 |
 | v1.3 | 首个安卓社区版：移动端移植 + 逐字歌词 |
 
@@ -226,7 +226,7 @@ it adds:
 
 Get the latest APK from [Releases](https://github.com/LJT-YTWH/SuchMusic-NG-Mobile/releases):
 
-- Latest: `SuchMusic-1.5.1-android.apk` (in-app version V1.5.2 / versionCode 8)
+- Latest: `SuchMusic-1.5.2-android.apk` (versionName 1.5.2 / versionCode 8)
 - Requires Android 7.0 (API 24) or above
 - Signed with the same community key, so it installs over older versions directly; a different
   signing key will be rejected
@@ -235,7 +235,7 @@ Get the latest APK from [Releases](https://github.com/LJT-YTWH/SuchMusic-NG-Mobi
 
 | Version | Summary |
 | --- | --- |
-| **v1.5.1** | Full 1.5.x line: dock capsule UI, landscape Cover Flow, AI lyric translation, song export, light theme support, landscape UI overhaul (1.4.0 was never released separately — its changes are included here) |
+| **v1.5.2** | Full 1.5.x line: dock capsule UI, landscape Cover Flow, AI lyric translation, song export, light theme support, landscape UI overhaul (includes 1.5.0 / 1.5.1; 1.4.0 was never released separately — its changes are included too) |
 | v1.3.1 | Local playlist improvements, landscape drawer fixes, karaoke generation timing fix, notification cover art |
 | v1.3 | First Android community edition: mobile port + karaoke lyrics |
 
