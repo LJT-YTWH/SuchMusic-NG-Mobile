@@ -37,21 +37,40 @@
 将原 Electron 桌面版完整移植到 Android 平台（Capacitor 8 + WebView），在保留原项目
 插件化音源、播放器、歌词等能力的基础上，新增：
 
-- 📱 **移动端界面**：竖屏 / 横屏双布局，全屏播放页、手势切页、迷你播放条
+- 📱 **移动端界面**：竖屏 / 横屏双布局、全屏播放页（上下滑动开关）、手势切页
+  - 竖屏：5 槽位毛玻璃胶囊底栏（首页 / 广场 / 中央圆形封面 / 本地 / 我的），点封面横向弹簧展开音乐控制面板
+  - 横屏：左侧图标胶囊导航（首页 / 广场 / 搜索 / 最近播放 / 本地 / 我的）+ 独立圆形封面，点击后自左向右展开音乐控制胶囊
+  - 支持浅色 / 深色主题，弹层统一为「从按钮长成卡片」的动画
 - 🎤 **逐字歌词生成**：基于音频强制对齐（V3 / V4 两套算法，纯 DSP + 动态规划），
   将逐行 LRC 转换为逐字卡拉 OK 歌词，支持翻译行与词间空格保留
 - 🎛 **逐字歌词管理**：开关、自动生成、生成时机、生成完后播放位置、
   算法选择；生成文件持久化于应用私有目录，支持在设置页批量删除
+- 🤖 **AI 歌词翻译**：调用讯飞星火 `spark-x2.5-1.7b`（关闭思考）逐行翻译，
+  可填写歌曲背景与翻译要求；已有逐字歌词时可选择重新生成或直接追加译文
+- 💾 **歌曲下载**：音频文件 / 歌词 / AI 译文 / 逐字歌词可选，通过系统目录选择器
+  自由选择保存位置，导出音频自动写入标题、歌手、专辑与封面标签
 - 🎚 **播放增强**：均衡器、响度均衡、变速、声像/立体声扩展、人声消除等
+- 🖼 **横屏 Cover Flow**：3D 封面流浏览（拖拽 / 惯性 / 滚轮 / 拖动条 / 方向键 / 环境光 / 倒影），
+  支持我的歌单、歌单广场、排行榜、本地音乐（按专辑聚合）、最近播放与歌单详情
 - 🌐 **插件化音源**：沿用原项目的落雪插件体系，支持用户自配音源
+- ⚡ **性能优化**：长列表虚拟滚动、Cover Flow 虚拟化与封面预加载、进度条 / 歌词行拆分渲染、
+  歌词布局缓存 + 二分查找、纯合成层动画
 
 ## 📲 下载安装
 
 前往 [Releases](https://github.com/LJT-YTWH/SuchMusic-NG-Mobile/releases) 下载最新 APK：
 
-- `SuchMusic-1.3-android-community.apk`（versionName 1.3 / versionCode 2）
-- 系统要求：Android 6.0 及以上
-- 若覆盖安装失败，请先卸载旧版（签名不一致时 Android 会拒绝覆盖）
+- 最新：`SuchMusic-1.5.1-android.apk`（应用内版本 V1.5.2 / versionCode 8）
+- 系统要求：Android 7.0（API 24）及以上
+- 使用同一个社区版签名，可直接覆盖安装旧版本；签名不一致时会安装失败
+
+### 版本历史
+
+| 版本 | 说明 |
+| --- | --- |
+| **v1.5.1** | 1.5 系列完整更新：底栏胶囊 UI、横屏 Cover Flow、AI 歌词翻译、歌曲下载、浅色模式适配、横屏界面重做（1.4.0 未单独发布，内容已并入本版本） |
+| v1.3.1 | 本地歌单增强、横屏抽屉修复、逐字歌词生成时机修复、通知栏封面 |
+| v1.3 | 首个安卓社区版：移动端移植 + 逐字歌词 |
 
 ## 🧱 技术栈
 
@@ -71,17 +90,24 @@
 # 1. 安装依赖
 npm install
 
-# 2. 构建移动端 Web 资源
-NODE_OPTIONS=--max-old-space-size=1536 npx vite build --config vite.config.mobile.ts
+# 2. 构建移动端 Web 资源（内存紧张时关闭压缩并限制 Node 堆，见下方说明）
+NODE_OPTIONS="--max-old-space-size=1280 --max-semi-space-size=32" \
+  node node_modules/vite/bin/vite.js build --config vite.config.mobile.ts --minify false
 
-# 3. 同步到 Android 工程
-npx cap sync android
+# 3. 同步到 Android 工程（无插件变更时用 cap copy 更快）
+npx cap copy android
 
-# 4. 打包
-cd android && ./gradlew assembleRelease
+# 4. 打包（release 已通过 keystore.properties 配置签名时可覆盖安装）
+cd android && ./gradlew assembleRelease --no-daemon
 ```
 
 产物：`android/app/build/outputs/apk/release/app-release.apk`
+
+> 打包前建议先 `cd android && ./gradlew --stop` 停掉闲置的 Gradle 守护进程。
+> 默认压缩（minify=true）在内存受限环境中容易被 OOM Kill，此时请保留 `--minify false`。
+>
+> AI 歌词翻译需要讯飞星火 API Key：在仓库根目录新建 `.env.local` 写入
+> `VITE_SPARK_API_KEY=ak-xxxx`（该文件已被 `.gitignore` 忽略，不会入库）；未配置时仅该功能不可用。
 
 ### 关于签名
 
@@ -105,9 +131,15 @@ keyPassword=你的密码
 
 ```
 ├── android/                        # Capacitor Android 工程
-├── src/renderer/src/mobile/        # 移动端界面（播放页、设置、组件）
+├── src/renderer/src/mobile/
+│   ├── components/                 # 底栏、侧栏、Cover Flow、跑马灯、卡片弹层等组件
+│   ├── composables/                # 横屏判定、浏览方式、虚拟滚动、弹层原点等组合式函数
+│   ├── views/                      # 首页 / 广场 / 本地 / 我的 / 播放页 / 设置页
+│   └── theme.css                   # 移动端主题令牌（深色 / 浅色）
 ├── src/renderer/src/platform/      # 平台桥接（移动端 IPC / 文件 / 原生能力）
 ├── src/renderer/src/utils/karaoke/ # 逐字歌词算法（V3/V4）与存储管理
+├── src/renderer/src/utils/aiLyric/ # AI 歌词翻译（星火）与译文存储
+├── src/renderer/src/utils/export/  # 歌曲 / 歌词导出（SAF 目录写入、音频标签）
 ├── vite.config.mobile.ts           # 移动端构建配置
 ├── capacitor.config.ts             # Capacitor 配置
 └── README-PC.md                    # 原项目（PC 版）README 存档
@@ -160,26 +192,52 @@ A full port of the original Electron desktop app to Android (Capacitor 8 + WebVi
 While keeping the original plugin-based music sources, player and lyric capabilities,
 it adds:
 
-- 📱 **Mobile UI** — portrait & landscape layouts, full-screen player page, gesture paging,
-  mini player bar
+- 📱 **Mobile UI** — portrait & landscape layouts, full-screen player page (swipe up/down to
+  open/close), gesture paging
+  - Portrait: 5-slot frosted-glass dock (Home / Square / center cover / Local / Mine); tapping
+    the cover expands the music control panel sideways with a spring animation
+  - Landscape: icon-only capsule navigation on the left (Home / Square / Search / Recently
+    played / Local / Mine) plus a standalone circular cover that expands a control capsule
+    left-to-right when tapped
+  - Light & dark themes; every sheet morphs out of the button that triggered it
 - 🎤 **Word-by-word lyric generation** — forced alignment on the audio track (V3 / V4 algorithms,
   pure DSP + dynamic programming) that converts line-level LRC into karaoke-style word-level
   lyrics, preserving translation lines and inter-word spaces
 - 🎛 **Karaoke lyric management** — enable/disable, auto-generation, generation timing,
   playback position after generation, algorithm selection; generated files are stored in the
   app's private directory and can be batch-deleted in Settings
+- 🤖 **AI lyric translation** — line-by-line translation via iFlytek Spark `spark-x2.5-1.7b`
+  (thinking disabled), with optional song background / requirements; when karaoke lyrics already
+  exist you can regenerate them or merge the translations in place
+- 💾 **Song export** — pick audio / lyrics / AI translation / karaoke lyrics, choose any folder
+  through the system directory picker, and exported audio gets title, artist, album and cover
+  tags written in
 - 🎚 **Playback enhancements** — equalizer, loudness normalization, speed control,
   stereo/balance adjustments, vocal removal, etc.
+- 🖼 **Landscape Cover Flow** — 3D cover browsing (drag / inertia / wheel / slider / arrow keys /
+  ambient light / reflections) for playlists, the playlist square, toplists, local music
+  (grouped by album), recently played and playlist details
 - 🌐 **Plugin-based music sources** — inherits the original Snowdrop plugin system
+- ⚡ **Performance** — list virtualization, Cover Flow virtualization with cover preloading,
+  split rendering for the progress bar and lyric lines, cached lyric layout with binary search,
+  compositor-only animations
 
 ## 📲 Download & Install
 
 Get the latest APK from [Releases](https://github.com/LJT-YTWH/SuchMusic-NG-Mobile/releases):
 
-- `SuchMusic-1.3-android-community.apk` (versionName 1.3 / versionCode 2)
-- Requires Android 6.0 or above
-- If an update fails to install, uninstall the old version first (Android rejects APKs signed
-  with a different key)
+- Latest: `SuchMusic-1.5.1-android.apk` (in-app version V1.5.2 / versionCode 8)
+- Requires Android 7.0 (API 24) or above
+- Signed with the same community key, so it installs over older versions directly; a different
+  signing key will be rejected
+
+### Version history
+
+| Version | Summary |
+| --- | --- |
+| **v1.5.1** | Full 1.5.x line: dock capsule UI, landscape Cover Flow, AI lyric translation, song export, light theme support, landscape UI overhaul (1.4.0 was never released separately — its changes are included here) |
+| v1.3.1 | Local playlist improvements, landscape drawer fixes, karaoke generation timing fix, notification cover art |
+| v1.3 | First Android community edition: mobile port + karaoke lyrics |
 
 ## 🧱 Tech Stack
 
@@ -199,17 +257,26 @@ Requirements: Node.js ≥ 20, JDK 21, Android SDK (compileSdk 36).
 # 1. Install dependencies
 npm install
 
-# 2. Build mobile web assets
-NODE_OPTIONS=--max-old-space-size=1536 npx vite build --config vite.config.mobile.ts
+# 2. Build mobile web assets (disable minify and cap the Node heap on small machines)
+NODE_OPTIONS="--max-old-space-size=1280 --max-semi-space-size=32" \
+  node node_modules/vite/bin/vite.js build --config vite.config.mobile.ts --minify false
 
-# 3. Sync to the Android project
-npx cap sync android
+# 3. Sync to the Android project (cap copy is faster when no plugin changed)
+npx cap copy android
 
-# 4. Build the APK
-cd android && ./gradlew assembleRelease
+# 4. Build the APK (signing is picked up from keystore.properties)
+cd android && ./gradlew assembleRelease --no-daemon
 ```
 
 Output: `android/app/build/outputs/apk/release/app-release.apk`
+
+> Run `cd android && ./gradlew --stop` before building to release an idle Gradle daemon.
+> The default minifier (minify=true) tends to be OOM-killed on memory-constrained machines;
+> keep `--minify false` there.
+>
+> AI lyric translation needs an iFlytek Spark API key: create `.env.local` in the repository root
+> with `VITE_SPARK_API_KEY=ak-xxxx` (the file is git-ignored); without it only that feature is
+> unavailable.
 
 ### Signing
 
@@ -235,9 +302,15 @@ Without this file the build produces an **unsigned** release APK (debug use only
 
 ```
 ├── android/                        # Capacitor Android project
-├── src/renderer/src/mobile/        # Mobile UI (player page, settings, components)
+├── src/renderer/src/mobile/
+│   ├── components/                 # Dock, side nav, Cover Flow, marquee, card sheets
+│   ├── composables/                # Landscape detection, layout mode, virtual rows, morph origin
+│   ├── views/                      # Home / Square / Local / Playlists / Player / Settings
+│   └── theme.css                   # Mobile theme tokens (dark / light)
 ├── src/renderer/src/platform/      # Platform bridge (mobile IPC / files / native)
 ├── src/renderer/src/utils/karaoke/ # Karaoke algorithms (V3/V4) and storage management
+├── src/renderer/src/utils/aiLyric/ # AI lyric translation (Spark) and storage
+├── src/renderer/src/utils/export/  # Song / lyric export (SAF writes, audio tags)
 ├── vite.config.mobile.ts           # Mobile build config
 ├── capacitor.config.ts             # Capacitor config
 └── README-PC.md                    # Archived README of the original PC project
