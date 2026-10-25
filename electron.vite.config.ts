@@ -11,7 +11,9 @@ export default defineConfig(({ mode }) => {
       plugins: [externalizeDepsPlugin()],
       define: {
         'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(env.VITE_SUPABASE_URL),
-        'import.meta.env.VITE_SUPABASE_KEY': JSON.stringify(env.VITE_SUPABASE_KEY)
+        'import.meta.env.VITE_SUPABASE_KEY': JSON.stringify(env.VITE_SUPABASE_KEY),
+        // 星火（MaaS）API Key：仅从根目录 .env.local 注入，不写进源码仓库
+        'import.meta.env.VITE_SPARK_API_KEY': JSON.stringify(env.VITE_SPARK_API_KEY)
       }
     },
     preload: {
@@ -23,6 +25,10 @@ export default defineConfig(({ mode }) => {
           '@renderer': resolve('src/renderer/src'),
           'suth-lyric-kit': resolve('packages/suth-lyric-kit/src/index.ts')
         }
+      },
+      define: {
+        // 星火（MaaS）API Key：仅从根目录 .env.local 注入，不写进源码仓库
+        'import.meta.env.VITE_SPARK_API_KEY': JSON.stringify(env.VITE_SPARK_API_KEY)
       },
       plugins: [vue(), wasm(), topLevelAwait()]
     }
