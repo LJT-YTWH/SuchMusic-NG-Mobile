@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { usePlayerStore } from '../../stores/playerStore'
 import { webAudioEngine } from '../../audio/audio-engine'
 import MobileCover from '../../mobile/components/MobileCover.vue'
+import { rememberMorphOrigin } from '../../mobile/composables/useMorphOrigin'
 
 const player = usePlayerStore()
+const rootRef = ref<HTMLElement | null>(null)
 
 const progressPercent = computed(() => {
   const duration = player.currentSong?.durationMs ?? 0
@@ -29,12 +31,14 @@ const togglePlay = async (): Promise<void> => {
 }
 
 const openPlayerPage = (): void => {
+  // 记录迷你播放条位置：播放页以「卡片展开」动画从它生长出来
+  rememberMorphOrigin(rootRef.value)
   player.setPlayerPageShown(true)
 }
 </script>
 
 <template>
-  <div class="minibar" @click="openPlayerPage">
+  <div ref="rootRef" class="minibar" @click="openPlayerPage">
     <MobileCover :src="player.currentSong?.cover" class="cover" radius="14px" />
     <div class="info">
       <div class="title">{{ player.currentSong?.title || '未在播放' }}</div>

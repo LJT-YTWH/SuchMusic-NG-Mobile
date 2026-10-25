@@ -126,6 +126,27 @@ export async function saveKaraokeFor(
   await saveManifest(list)
 }
 
+/**
+ * 原地更新某首歌的逐字歌词内容（保留算法/创建时间等清单信息）。
+ * 用于把 AI 译文插回已生成的逐字歌词文件。
+ */
+export async function updateKaraokeContent(filePath: string, content: string): Promise<void> {
+  const list = await listKaraoke()
+  const idx = list.findIndex((e) => e.filePath === filePath)
+  if (idx < 0) return
+  const key = list[idx].key
+  await ensureDir()
+  await Filesystem.writeFile({
+    path: filePathOf(key),
+    directory: Directory.Data,
+    data: content,
+    encoding: Encoding.UTF8,
+    recursive: true
+  })
+  list[idx] = { ...list[idx], sizeBytes: new Blob([content]).size }
+  await saveManifest(list)
+}
+
 /** 按主键删除（管理界面批量删除用），返回删除数量 */
 export async function deleteKaraokeEntries(keys: string[]): Promise<number> {
   const list = await listKaraoke()

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { NSpin, NEmpty, useMessage, useDialog } from 'naive-ui'
 import { useSettingsStore } from '../../../../stores/settingsStore'
 import { useLocalMusicStore } from '../../../../stores/localMusicStore'
@@ -8,10 +8,23 @@ import {
   deleteKaraokeEntries,
   type KaraokeEntry
 } from '../../../../utils/karaoke/karaokeStorage'
+import {
+  aiSongKeyOf,
+  listAiLyrics,
+  type AiLyricEntry
+} from '../../../../utils/aiLyric/aiLyricStorage'
+import {
+  clearAiLyricByEntry,
+  isKaraokeContent,
+  removeTranslationsFromLrc
+} from '../../../../utils/aiLyric/aiLyricService'
+import { usePlayerStore } from '../../../../stores/playerStore'
+import { syncAppliedKaraokeContent } from '../../../../utils/karaoke/karaokeService'
 
 // 本地与缓存：扫描目录 + 播放缓存 + 逐字歌词管理
 const settingsStore = useSettingsStore()
 const localStore = useLocalMusicStore()
+const player = usePlayerStore()
 const message = useMessage()
 const dialog = useDialog()
 
@@ -107,9 +120,69 @@ const formatDate = (ts: number): string => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
+// ==================== AI 翻译歌词管理 ====================
+
+const aiLyricList = ref<AiLyricEntry[]>([])
+const aiLyricChecked = ref<string[]>([])
+
+const aiLyricTotalSize = computed(() =>
+  aiLyricList.value.reduce((sum, e) => sum + (e.sizeBytes || 0), 0)
+)
+
+async function refreshAiLyrics(): Promise<void> {
+  try {
+    aiLyricList.value = await listAiLyrics()
+  } catch {
+    aiLyricList.value = []
+  }
+}
+
+function toggleAiLyric(key: string): void {
+  const idx = aiLyricChecked.value.indexOf(key)
+  if (idx >= 0) aiLyricChecked.value.splice(idx, 1)
+  else aiLyricChecked.value.push(key)
+}
+
+function deleteSelectedAiLyrics(): void {
+  const count = aiLyricChecked.value.length
+  if (!count) return
+  dialog.warning({
+    title: '删除 AI 翻译歌词',
+    content: `将删除所选 ${count} 首歌曲的 AI 翻译文件，并移除已写入逐字歌词中的 AI 译文，确定继续吗？`,
+    positiveText: '删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      const selected = aiLyricList.value.filter((e) => aiLyricChecked.value.includes(e.key))
+      for (const entry of selected) {
+        const res = await clearAiLyricByEntry(entry)
+        const cur = player.currentSong
+        if (!cur) continue
+        // 当前正在播放这首歌：同步移除界面上的译文
+        if (res.karaokeContent && res.filePath && cur.filePath === res.filePath) {
+          player.setLyrics(res.karaokeContent)
+          syncAppliedKaraokeContent(cur.id, res.karaokeContent)
+        } else if (
+          aiSongKeyOf(cur) === entry.songKey &&
+          cur.lyrics &&
+          !isKaraokeContent(cur.lyrics)
+        ) {
+          const cleaned = removeTranslationsFromLrc(cur.lyrics)
+          player.setLyrics(cleaned)
+          syncAppliedKaraokeContent(cur.id, cleaned)
+        }
+      }
+      const n = selected.length
+      aiLyricChecked.value = []
+      await refreshAiLyrics()
+      message.success(`已删除 ${n} 首歌曲的 AI 翻译`)
+    }
+  })
+}
+
 onMounted(() => {
   void refreshCacheInfo()
   void refreshKaraoke()
+  void refreshAiLyrics()
 })
 </script>
 
@@ -188,6 +261,53 @@ onMounted(() => {
       <n-empty
         v-else
         description="暂无逐字歌词，可在播放页「更多 → 歌词 → 本地逐字歌词」中生成"
+        style="padding: 20px 0"
+      />
+    </div>
+
+    <div class="mp-section-title">AI 翻译歌词</div>
+    <div class="mp-list setting-list">
+      <div class="setting-row">
+        <span class="row-label">已生成</span>
+        <span class="row-value">
+          {{ aiLyricList.length }} 首<template v-if="aiLyricTotalSize">（{{ formatSize(aiLyricTotalSize) }}）</template>
+        </span>
+      </div>
+      <template v-if="aiLyricList.length">
+        <div
+          v-for="entry in aiLyricList"
+          :key="entry.key"
+          class="setting-row karaoke-row"
+          @click="toggleAiLyric(entry.key)"
+        >
+          <i
+            class="karaoke-check"
+            :class="
+              aiLyricChecked.includes(entry.key) ? 'mgc_check_circle_fill checked' : 'mgc_round_line'
+            "
+          ></i>
+          <span class="karaoke-main">
+            <span class="karaoke-title">{{ entry.title }}</span>
+            <span class="karaoke-sub">
+              {{ entry.artist }} · {{ entry.lineCount }} 行 · {{ entry.model }} ·
+              {{ formatDate(entry.createdAt) }}
+            </span>
+          </span>
+        </div>
+        <div
+          class="setting-row"
+          :class="{ 'row-disabled': !aiLyricChecked.length }"
+          @click="deleteSelectedAiLyrics"
+        >
+          <span class="row-label danger">
+            <i class="mgc_delete_line row-ic"></i>删除所选 AI 翻译
+            <template v-if="aiLyricChecked.length">（{{ aiLyricChecked.length }}）</template>
+          </span>
+        </div>
+      </template>
+      <n-empty
+        v-else
+        description="暂无 AI 翻译，可在播放页「更多 → 歌词 → AI 歌词翻译」中生成"
         style="padding: 20px 0"
       />
     </div>

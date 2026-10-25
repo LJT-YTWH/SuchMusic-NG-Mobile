@@ -103,7 +103,32 @@ export interface AppPrefsPlugin {
   setOrientation(options: { mode: 'auto' | 'portrait' | 'landscape' }): Promise<void>
 }
 
+// ==================== 文件导出插件（SAF 目录选择） ====================
+
+export interface FileExportItem {
+  /** 保存的文件名（含扩展名） */
+  name: string
+  /** MIME 类型，缺省为 application/octet-stream */
+  mimeType?: string
+  /** 文本内容（UTF-8），与 sourcePath 二选一 */
+  text?: string
+  /** 本地源文件路径或 content:// URI */
+  sourcePath?: string
+}
+
+export interface FileExportPlugin {
+  /** 弹出系统目录选择器并写入文件 */
+  saveFiles(options: { files: FileExportItem[] }): Promise<{
+    canceled: boolean
+    count: number
+    failed: number
+    location?: string
+    error?: string
+  }>
+}
+
 export const SuchLocalMusic = registerPlugin<SuchLocalMusicPlugin>('SuchLocalMusic')
 export const MediaSession = registerPlugin<MediaSessionPlugin>('MediaSession')
 export const FloatingLyric = registerPlugin<FloatingLyricPlugin>('FloatingLyric')
 export const AppPrefs = registerPlugin<AppPrefsPlugin>('AppPrefs')
+export const FileExport = registerPlugin<FileExportPlugin>('FileExport')

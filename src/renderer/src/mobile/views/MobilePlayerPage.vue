@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, watch, onBeforeUnmount } from 'vue'
-import { NSlider, NSpin, NEmpty, NSwitch, useMessage, useDialog } from 'naive-ui'
+import { ref, reactive, computed, watch, onBeforeUnmount, nextTick } from 'vue'
+import { NSpin, NEmpty, NSwitch, useMessage, useDialog } from 'naive-ui'
 import { Filesystem, Encoding } from '@capacitor/filesystem'
 import { usePlayerStore } from '../../stores/playerStore'
 import { usePlaylistStore, type PlaylistTrack } from '../../stores/playlistStore'
@@ -10,18 +10,40 @@ import { parseLyricsToCore } from '../../utils/lyric/lyricParser'
 import {
   karaokeState,
   generateForCurrentSong,
-  clearCurrentKaraoke
+  regenerateKaraokeWithLyrics,
+  clearCurrentKaraoke,
+  syncAppliedKaraokeContent
 } from '../../utils/karaoke/karaokeService'
 import type { KaraokeAlgo } from '../../utils/karaoke/aligner'
 import { fetchNewComments, type CommentItem } from '../../apis/netease/comment'
 import { cloudSearch, type SearchSong } from '../../apis/netease/search/cloudsearch'
 import { fetchNewLyric } from '../../apis/netease/lyric'
+import {
+  translateSongLyrics,
+  applySavedAiLyric,
+  applyAiLyricToKaraoke,
+  clearAiLyricForSong,
+  removeTranslationsFromKaraoke,
+  type TranslateProgress
+} from '../../utils/aiLyric/aiLyricService'
+import { aiSongKeyOf, hasAiLyric } from '../../utils/aiLyric/aiLyricStorage'
+import {
+  exportSongFiles,
+  getSongExportAvailability,
+  type SongExportOptions,
+  type SongExportAvailability
+} from '../../utils/export/songExport'
+import { isNativeMobile } from '../../platform'
 import { useDesktopLyric } from '../../composables/useDesktopLyric'
 import { useTaskbarLyric } from '../../composables/useTaskbarLyric'
 import { formatDuration } from '../helpers'
 import MobileCover from '../components/MobileCover.vue'
+import MobileProgressBar from '../components/MobileProgressBar.vue'
+import MobileLyricLine from '../components/MobileLyricLine.vue'
+import MarqueeText from '../components/MarqueeText.vue'
 import MobileEqPanel from '../components/MobileEqPanel.vue'
 import MobileFxPanel from '../components/MobileFxPanel.vue'
+import MobileSheet from '../components/MobileSheet.vue'
 import defaultCover from '@renderer/assets/icon.png'
 
 const player = usePlayerStore()
@@ -37,9 +59,15 @@ const { toggle: toggleTaskbarLyric } = useTaskbarLyric()
 const visible = computed(() => player.isPlayerPageShown)
 const rendered = ref(false)
 const closing = ref(false)
-// 每次打开递增 key 强制重挂载，确保上滑动画完整重播（修复重新打开卡在半路）
+// 每次打开递增 key 强制重挂载，确保展开动画完整重播（修复重新打开卡在半路）
 const pageKey = ref(0)
 let closeTimer: number | undefined
+
+// ==================== 页面上下切换（从屏幕下方滑入 / 滑出） ====================
+
+// 打开完成标记：先在屏幕外（下方）渲染，再上滑到屏幕内
+const pageOpened = ref(false)
+let openRaf = 0
 
 watch(visible, (v) => {
   if (v) {
@@ -54,23 +82,32 @@ watch(visible, (v) => {
     transitioning.value = false
     skipGesture = false
     closing.value = false
+    pageOpened.value = false
     rendered.value = true
     pageKey.value++
     startLyricEngine()
+    // 两帧后再上滑：让起始位置（屏幕下方）先上屏，过渡才有起点
+    if (openRaf) cancelAnimationFrame(openRaf)
+    openRaf = requestAnimationFrame(() => {
+      openRaf = requestAnimationFrame(() => {
+        pageOpened.value = true
+        openRaf = 0
+      })
+    })
   } else {
     closing.value = true
+    pageOpened.value = false
     stopLyricEngine()
     closeTimer = window.setTimeout(() => {
       rendered.value = false
       closing.value = false
       closeTimer = undefined
-    }, 300)
+    }, 380)
   }
 })
 
 const close = (): void => {
-  // 复位下拉位移，避免下次打开停在半路
-  dragY.value = 0
+  // 保留当前 dragY 作为下滑起点，由 closing 状态统一滑出屏幕
   player.setPlayerPageShown(false)
 }
 
@@ -118,20 +155,6 @@ const modeLabel = computed(() => {
       return '列表循环'
   }
 })
-
-const progressPercent = computed(() => {
-  const d = song.value?.durationMs ?? 0
-  if (!d) return 0
-  return Math.min((player.positionMs / d) * 100, 100)
-})
-
-const handleSeek = (percent: number): void => {
-  const d = song.value?.durationMs ?? 0
-  if (!d) return
-  const target = (percent / 100) * d
-  webAudioEngine.seek(target)
-  player.setPosition(target)
-}
 
 // ==================== 添加到本地歌单 ====================
 
@@ -247,6 +270,9 @@ const lyricVars = computed(() => {
   return vars
 })
 
+// AI 翻译自动套用令牌：防止切歌后旧请求把译文写到新歌曲上
+let aiApplyToken = 0
+
 watch(
   () => [song.value?.id, song.value?.lyrics],
   () => {
@@ -279,6 +305,20 @@ watch(
         .filter((l) => l.text.trim())
     } catch {
       lyricLines.value = []
+    }
+
+    // 已保存过 AI 翻译的歌曲：播放时自动合并译文（已包含则直接跳过）
+    const autoSong = song.value
+    if (autoSong) {
+      const token = ++aiApplyToken
+      void applySavedAiLyric(autoSong, content)
+        .then((merged) => {
+          if (!merged || token !== aiApplyToken) return
+          if (player.currentSong?.id !== autoSong.id) return
+          player.setLyrics(merged)
+          syncAppliedKaraokeContent(autoSong.id, merged)
+        })
+        .catch(() => undefined)
     }
   },
   { immediate: true }
@@ -317,21 +357,51 @@ function estTimeSec(): number {
   return t
 }
 
-function lyricTargetY(): number {
+// ---- 行位置缓存 ----
+// 旧实现每一帧都读 offsetTop / clientHeight：这会强制浏览器同步重排整页，
+// 是歌词滚动卡顿的直接原因。现在只在布局真正变化时测量一次（打开页面 / 切歌 /
+// 旋转屏幕 / 改字号），逐帧只做数学运算和 transform 写入。
+let lineTops: number[] = []
+let lineHeights: number[] = []
+let stageHeight = 0
+let lastWrittenY = Number.NaN
+
+function measureLyrics(): void {
   const stage = lyricStageRef.value
   const inner = lyricInnerRef.value
-  if (!stage || !inner) return 0
+  if (!stage || !inner) {
+    lineTops = []
+    lineHeights = []
+    stageHeight = 0
+    return
+  }
+  stageHeight = stage.clientHeight
+  const kids = inner.children
+  const tops: number[] = []
+  const heights: number[] = []
+  // children[0] 是顶部占位（.lyric-head-space），最后一个是尾部占位
+  for (let i = 1; i < kids.length - 1; i += 1) {
+    const el = kids[i] as HTMLElement
+    tops.push(el.offsetTop)
+    heights.push(el.offsetHeight)
+  }
+  lineTops = tops
+  lineHeights = heights
+  lastWrittenY = Number.NaN
+}
+
+function lyricTargetY(): number {
   const idx = activeIdx.value
-  if (idx < 0 || idx >= inner.children.length) return 0
-  const el = inner.children[idx] as HTMLElement
+  if (idx < 0 || idx >= lineTops.length) return 0
   // 当前行中心对齐到舞台 38% 高度处
-  return el.offsetTop + el.clientHeight / 2 - stage.clientHeight * 0.38
+  return lineTops[idx] + lineHeights[idx] / 2 - stageHeight * 0.38
 }
 
 // ---- 逐字高亮（Apple Music 风格逐词填充）：每帧更新活跃行内各词的 --p 进度 ----
 // 注意：lyricInnerRef 的 children[0] 是顶部占位（.lyric-head-space），歌词行从索引 1 开始
 let lastWordLineIdx = -1
 let wordPCache: number[] = []
+let cachedWordEls: HTMLElement[] = []
 
 function lyricLineEl(idx: number): HTMLElement | null {
   const inner = lyricInnerRef.value
@@ -341,7 +411,7 @@ function lyricLineEl(idx: number): HTMLElement | null {
 
 function updateWordHighlight(t: number): void {
   const idx = activeIdx.value
-  // 切换活跃行：清除旧行所有词的填充进度
+  // 切换活跃行：清除旧行所有词的填充进度，并缓存新行的词节点
   if (idx !== lastWordLineIdx) {
     const oldEl = lastWordLineIdx >= 0 ? lyricLineEl(lastWordLineIdx) : null
     if (oldEl) {
@@ -351,13 +421,15 @@ function updateWordHighlight(t: number): void {
     }
     lastWordLineIdx = idx
     wordPCache = []
+    const el = idx >= 0 ? lyricLineEl(idx) : null
+    cachedWordEls = el
+      ? Array.from(el.querySelectorAll<HTMLElement>('.lyric-word'))
+      : []
   }
   if (idx < 0) return
   const line = lyricLines.value[idx]
   if (!line?.words) return
-  const el = lyricLineEl(idx)
-  if (!el) return
-  const wordEls = el.querySelectorAll('.lyric-word')
+  const wordEls = cachedWordEls
   const n = Math.min(wordEls.length, line.words.length)
   if (wordPCache.length !== n) wordPCache = new Array(n).fill(-1)
   for (let i = 0; i < n; i++) {
@@ -368,7 +440,7 @@ function updateWordHighlight(t: number): void {
     const pct = Math.round(p * 1000) / 10
     if (wordPCache[i] !== pct) {
       wordPCache[i] = pct
-      ;(wordEls[i] as HTMLElement).style.setProperty('--p', pct + '%')
+      wordEls[i].style.setProperty('--p', pct + '%')
     }
   }
 }
@@ -376,24 +448,34 @@ function updateWordHighlight(t: number): void {
 function lyricEngineFrame(): void {
   if (!engineRunning) return
 
-  // 1. 用外推时间计算活跃行
+  // 1. 用外推时间计算活跃行（二分查找，避免每帧线性扫描歌词数组）
   const t = estTimeSec()
-  let idx = -1
   const lines = lyricLines.value
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].time <= t) idx = i
-    else break
+  let idx = -1
+  let lo = 0
+  let hi = lines.length - 1
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1
+    if (lines[mid].time <= t) {
+      idx = mid
+      lo = mid + 1
+    } else {
+      hi = mid - 1
+    }
   }
   if (idx !== activeIdx.value) activeIdx.value = idx
   updateWordHighlight(t)
 
-  // 2. 连续插值滚动（非手动浏览时）
+  // 2. 连续插值滚动（非手动浏览时）——只写 transform，不读布局
   const inner = lyricInnerRef.value
   if (inner && performance.now() > manualUntil) {
     const target = Math.max(lyricTargetY(), 0)
     smoothY += (target - smoothY) * 0.085
     if (Math.abs(target - smoothY) < 0.1) smoothY = target
-    inner.style.transform = `translate3d(0, ${-smoothY}px, 0)`
+    if (!(Math.abs(smoothY - lastWrittenY) <= 0.05)) {
+      inner.style.transform = `translate3d(0, ${(-smoothY).toFixed(2)}px, 0)`
+      lastWrittenY = smoothY
+    }
   }
 
   rafId = requestAnimationFrame(lyricEngineFrame)
@@ -403,6 +485,8 @@ function startLyricEngine(): void {
   if (engineRunning) return
   engineRunning = true
   smoothY = 0
+  lastWrittenY = Number.NaN
+  void nextTick(measureLyrics)
   rafId = requestAnimationFrame(lyricEngineFrame)
 }
 
@@ -411,14 +495,38 @@ function stopLyricEngine(): void {
   cancelAnimationFrame(rafId)
 }
 
+// 歌词行 DOM 变化 / 排版设置变化 → 重新测量行位置
+watch(
+  () => [lyricLines.value.length, settingsStore.lyricDisplay.fontSize, settingsStore.lyricDisplay.lineHeight],
+  () => {
+    if (!engineRunning) return
+    void nextTick(measureLyrics)
+  }
+)
+
+// 舞台尺寸变化（旋转屏幕、横竖屏切换）→ 重新测量
+let lyricObserver: ResizeObserver | null = null
+watch(lyricStageRef, (el) => {
+  lyricObserver?.disconnect()
+  lyricObserver = null
+  if (el && typeof ResizeObserver !== 'undefined') {
+    lyricObserver = new ResizeObserver(() => measureLyrics())
+    lyricObserver.observe(el)
+  }
+})
+
 // 切歌时重置
 watch(
   () => song.value?.id,
   () => {
     smoothY = 0
+    lastWrittenY = Number.NaN
     activeIdx.value = -1
     lastWordLineIdx = -1
+    cachedWordEls = []
     manualUntil = 0
+    lineTops = []
+    lineHeights = []
     const inner = lyricInnerRef.value
     if (inner) inner.style.transform = 'translate3d(0, 0, 0)'
   }
@@ -463,12 +571,22 @@ const onOrientationChange = (e: MediaQueryListEvent): void => {
 landscapeMq.addEventListener('change', onOrientationChange)
 
 const pageStyle = computed(() => {
-  const parts: string[] = []
-  if (dragY.value > 0) parts.push(`translateY(${dragY.value}px)`)
-  return {
-    transform: parts.join(' '),
-    transition: transitioning.value ? 'transform 0.32s cubic-bezier(0.32, 0.72, 0.35, 1)' : 'none'
+  // 关闭：从当前位置一口气滑到屏幕下方
+  if (closing.value) {
+    return {
+      transform: 'translateY(100%)',
+      transition: 'transform 320ms cubic-bezier(0.32, 0.72, 0.35, 1)'
+    }
   }
+  // 手势拖动 / 回弹：内联 transform 直接跟手
+  if (dragY.value > 0 || transitioning.value) {
+    return {
+      transform: `translateY(${dragY.value}px)`,
+      transition: transitioning.value ? 'transform 0.32s cubic-bezier(0.32, 0.72, 0.35, 1)' : 'none'
+    }
+  }
+  // 平时交给 CSS 的 .is-open 控制上滑入场
+  return {}
 })
 
 const trackStyle = computed(() => {
@@ -523,7 +641,8 @@ function onTouchMove(e: TouchEvent): void {
     const inner = lyricInnerRef.value
     if (inner) {
       smoothY = Math.max(lyricStartOffset - dy, -80)
-      inner.style.transform = `translate3d(0, ${-smoothY}px, 0)`
+      inner.style.transform = `translate3d(0, ${(-smoothY).toFixed(2)}px, 0)`
+      lastWrittenY = smoothY
       manualUntil = performance.now() + 2500
     }
   }
@@ -562,7 +681,10 @@ function onTouchEnd(): void {
 
 onBeforeUnmount(() => {
   stopLyricEngine()
+  lyricObserver?.disconnect()
+  lyricObserver = null
   if (closeTimer) clearTimeout(closeTimer)
+  if (openRaf) cancelAnimationFrame(openRaf)
   landscapeMq.removeEventListener('change', onOrientationChange)
 })
 
@@ -649,6 +771,82 @@ const showFx = ref(false)
 // ==================== 更多菜单 ====================
 
 const showActions = ref(false)
+
+// ==================== 下载 ====================
+
+const showDownload = ref(false)
+const downloadLoading = ref(false)
+const downloadAvailable = reactive<SongExportAvailability>({
+  audio: false,
+  lyrics: false,
+  ai: false,
+  karaoke: false,
+  audioExt: ''
+})
+const downloadOptions = reactive<SongExportOptions>({
+  audio: false,
+  lyrics: false,
+  ai: false,
+  karaoke: false
+})
+
+const downloadCount = computed(
+  () => Object.values(downloadOptions).filter(Boolean).length
+)
+
+function toggleDownloadOption(key: keyof SongExportOptions): void {
+  if (!downloadAvailable[key]) return
+  downloadOptions[key] = !downloadOptions[key]
+}
+
+function closeDownload(): void {
+  if (downloadLoading.value) return
+  showDownload.value = false
+}
+
+async function openDownload(): Promise<void> {
+  showActions.value = false
+  const cur = song.value
+  if (!cur) return
+  if (!isNativeMobile) {
+    message.info('仅支持在安卓应用内下载')
+    return
+  }
+  const avail = await getSongExportAvailability(cur)
+  Object.assign(downloadAvailable, avail)
+  downloadOptions.audio = avail.audio
+  downloadOptions.lyrics = avail.lyrics
+  downloadOptions.ai = avail.ai
+  downloadOptions.karaoke = avail.karaoke
+  showDownload.value = true
+}
+
+async function confirmDownload(): Promise<void> {
+  const cur = song.value
+  if (!cur || downloadLoading.value) return
+  if (!downloadCount.value) {
+    message.info('请至少选择一项下载内容')
+    return
+  }
+  downloadLoading.value = true
+  try {
+    const res = await exportSongFiles(cur, { ...downloadOptions })
+    if (res.canceled) return
+    if (!res.count) {
+      message.error(res.failed ? '导出失败，请重试' : '没有可导出的内容')
+      return
+    }
+    message.success(
+      `已导出 ${res.count} 个文件${res.location ? ` 到 ${res.location}` : ''}`
+    )
+    showDownload.value = false
+  } catch (e) {
+    console.error('[下载] 导出失败:', e)
+    message.error(e instanceof Error ? e.message : '导出失败，请重试')
+  } finally {
+    downloadLoading.value = false
+  }
+}
 
 const openFloatingLyric = async (): Promise<void> => {
   showActions.value = false
@@ -862,8 +1060,30 @@ function clearOnlineLyric(): void {
 // ''=关闭 root=歌词 online=在线歌词 local=本地逐字歌词 algo=选择生成算法
 // autoAlgo=自动生成算法 genMode=生成时机 afterPlay=生成完后
 const lyricSheet = ref<
-  '' | 'root' | 'online' | 'local' | 'algo' | 'autoAlgo' | 'genMode' | 'afterPlay'
+  '' | 'root' | 'online' | 'local' | 'algo' | 'autoAlgo' | 'genMode' | 'afterPlay' | 'ai'
 >('')
+
+// 卡片标题跟随层级变化（弹层内不再重复渲染标题）
+const lyricSheetTitle = computed(() => {
+  switch (lyricSheet.value) {
+    case 'online':
+      return '在线歌词'
+    case 'local':
+      return '本地逐字歌词'
+    case 'algo':
+      return '选择生成算法'
+    case 'autoAlgo':
+      return '自动生成算法'
+    case 'genMode':
+      return '生成时机'
+    case 'afterPlay':
+      return '生成完后'
+    case 'ai':
+      return 'AI 歌词翻译'
+    default:
+      return '歌词'
+  }
+})
 
 const openLyricSheet = (): void => {
   showActions.value = false
@@ -926,6 +1146,149 @@ const clearKaraoke = (): void => {
   })
 }
 
+// ==================== AI 歌词翻译 ====================
+
+const aiRequirement = ref('')
+const aiGenerating = ref(false)
+const aiStage = ref('')
+
+/** 当前歌词是否为逐字歌词（决定译文注入方式） */
+const currentLyricIsKaraoke = computed(() =>
+  (song.value?.lyrics || '').includes('<') && /<\d{1,2}:\d{1,2}/.test(song.value?.lyrics || '')
+)
+
+/** 当前歌曲是否已有 AI 翻译（控制「清空」按钮可用性） */
+const hasAiTranslation = ref(false)
+
+async function refreshAiTranslationState(): Promise<void> {
+  const cur = song.value
+  hasAiTranslation.value = cur ? await hasAiLyric(aiSongKeyOf(cur)) : false
+}
+
+watch(
+  () => song.value?.id,
+  () => {
+    // 切歌后清空上一次的翻译要求/背景输入
+    aiRequirement.value = ''
+    showDownload.value = false
+    void refreshAiTranslationState()
+  },
+  { immediate: true }
+)
+
+async function startAiTranslate(): Promise<void> {
+  const cur = song.value
+  if (!cur) return
+  const lyrics = cur.lyrics || ''
+  if (!lyrics.trim()) {
+    message.info('当前歌曲暂无歌词，请先获取歌词')
+    return
+  }
+  if (aiGenerating.value) return
+
+  aiGenerating.value = true
+  aiStage.value = '准备中…'
+  try {
+    const result = await translateSongLyrics({
+      song: cur,
+      lyrics,
+      requirement: aiRequirement.value,
+      onProgress: (p: TranslateProgress) => {
+        aiStage.value = p.stage
+      }
+    })
+
+    hasAiTranslation.value = true
+
+    // 仅在仍播放这首歌时应用/询问，避免切歌后误操作
+    if (player.currentSong?.id === cur.id) {
+      if (result.hasKaraoke) {
+        // 已有逐字歌词：询问是否用包含译文的逐行歌词重新生成
+        const shouldRegenerate = await new Promise<boolean>((resolve) => {
+          let done = false
+          const finish = (v: boolean): void => {
+            if (done) return
+            done = true
+            resolve(v)
+          }
+          dialog.info({
+            title: '重新生成逐字歌词',
+            content:
+              '当前歌曲已有逐字歌词。是否使用包含 AI 翻译的逐行歌词重新生成逐字歌词？生成约需 30~90 秒。',
+            positiveText: '重新生成',
+            negativeText: '保留现有',
+            onPositiveClick: () => finish(true),
+            onNegativeClick: () => finish(false),
+            onClose: () => finish(false),
+            onMaskClick: () => finish(false)
+          })
+        })
+
+        // 询问期间可能已切歌
+        if (player.currentSong?.id === cur.id) {
+          if (shouldRegenerate) {
+            aiStage.value = '正在重新生成逐字歌词…'
+            const ok = await regenerateKaraokeWithLyrics(cur, result.mergedLrc)
+            if (!ok) {
+              const injected = await applyAiLyricToKaraoke(cur)
+              if (injected) {
+                player.setLyrics(injected)
+                syncAppliedKaraokeContent(cur.id, injected)
+              }
+            }
+          } else {
+            const injected = await applyAiLyricToKaraoke(cur)
+            const next = injected || result.mergedLrc
+            player.setLyrics(next)
+            syncAppliedKaraokeContent(cur.id, next)
+          }
+        }
+      } else {
+        player.setLyrics(result.mergedLrc)
+      }
+    }
+
+    message.success(
+      `AI 翻译完成（${result.translatedCount} 行），已保存到 AI 翻译歌词目录`
+    )
+    lyricSheet.value = ''
+  } catch (e) {
+    console.error('[AI 翻译] 失败:', e)
+    message.error(e instanceof Error ? e.message : 'AI 翻译失败，请重试')
+  } finally {
+    aiGenerating.value = false
+    aiStage.value = ''
+  }
+}
+
+/** 清空当前歌曲的 AI 翻译（同时移除逐字歌词文件中的 AI 译文） */
+async function clearCurrentAiTranslate(): Promise<void> {
+  const cur = song.value
+  if (!cur || aiGenerating.value) return
+  try {
+    const res = await clearAiLyricForSong(cur)
+    if (!res.removed) {
+      hasAiTranslation.value = false
+      message.info('当前歌曲没有 AI 翻译')
+      return
+    }
+
+    const next = currentLyricIsKaraoke.value
+      ? (res.karaokeContent ?? removeTranslationsFromKaraoke(cur.lyrics || '', res.lines))
+      : res.plainLyrics
+
+    if (next != null && player.currentSong?.id === cur.id) {
+      player.setLyrics(next)
+      syncAppliedKaraokeContent(cur.id, next)
+    }
+    hasAiTranslation.value = false
+    message.success('已清空当前 AI 翻译')
+  } catch (e) {
+    console.error('[AI 翻译] 清空失败:', e)
+    message.error(e instanceof Error ? e.message : '清空失败，请重试')
+  }
+}
+
 // 逐字歌词服务的全局提示 → 桥接到 naive-ui message
 watch(
   () => karaokeState.notice,
@@ -944,7 +1307,7 @@ watch(
       v-if="rendered"
       :key="pageKey"
       class="player-page"
-      :class="{ closing, dragging: gestureAxis === 'v' }"
+      :class="{ closing, 'is-open': pageOpened, dragging: gestureAxis === 'v' }"
       :style="pageStyle"
       @touchstart.passive="onTouchStart"
       @touchmove.passive="onTouchMove"
@@ -963,8 +1326,9 @@ watch(
             <i class="mgc_down_line"></i>
           </button>
           <div class="title-block">
-            <div class="song-title">{{ song?.title || '未在播放' }}</div>
-            <div class="song-artist">{{ song?.artist || 'SuchMusic' }}</div>
+            <!-- 歌名 / 歌手过长时横向滚动 -->
+            <MarqueeText class="song-title" :text="song?.title || '未在播放'" />
+            <MarqueeText class="song-artist" :text="song?.artist || 'SuchMusic'" />
           </div>
         </div>
 
@@ -985,26 +1349,16 @@ watch(
               <div v-if="lyricLines.length" ref="lyricStageRef" class="lyric-stage" :style="lyricVars">
                 <div ref="lyricInnerRef" class="lyric-inner">
                   <div class="lyric-head-space"></div>
-                  <div
+                  <MobileLyricLine
                     v-for="(line, i) in lyricLines"
                     :key="i"
-                    class="lyric-line"
-                    :class="{ active: i === activeIdx }"
-                    @click="seekToLyric(line)"
-                  >
-                    <div class="lyric-text">
-                      <template v-if="line.words && line.words.length">
-                        <template v-for="(w, wi) in line.words" :key="wi"
-                          ><span class="lyric-word"
-                            ><span class="lw-base">{{ w.text }}</span
-                            ><span class="lw-fill" aria-hidden="true">{{ w.text }}</span></span
-                          >&#8203;</template
-                        >
-                      </template>
-                      <template v-else>{{ line.text }}</template>
-                    </div>
-                    <div v-if="showTranslation && line.ttext" class="lyric-ttext">{{ line.ttext }}</div>
-                  </div>
+                    :text="line.text"
+                    :ttext="line.ttext"
+                    :words="line.words"
+                    :active="i === activeIdx"
+                    :show-translation="showTranslation"
+                    @seek="seekToLyric(line)"
+                  />
                   <div class="lyric-tail-space"></div>
                 </div>
               </div>
@@ -1031,19 +1385,8 @@ watch(
           <span class="dot" :class="{ active: pageIndex === 1 }"></span>
         </div>
 
-        <!-- 进度 -->
-        <div class="progress-area">
-          <n-slider
-            :value="progressPercent"
-            :tooltip="false"
-            class="progress-slider"
-            @update:value="handleSeek"
-          />
-          <div class="time-row">
-            <span>{{ formatDuration(player.positionMs) || '0:00' }}</span>
-            <span>{{ formatDuration(song?.durationMs) || '0:00' }}</span>
-          </div>
-        </div>
+        <!-- 进度（独立组件：高频进度更新不会带动整页重渲染） -->
+        <MobileProgressBar />
 
         <!-- 主控制（横屏：底栏收纳为一个「更多」按钮，与播放控制同一行） -->
         <div class="controls">
@@ -1083,27 +1426,24 @@ watch(
         </div>
       </div>
 
-      <!-- 均衡器弹层（就地调节，不跳转设置页；横屏自动变为右侧抽屉） -->
-      <div v-if="showEq" class="mp-sheet-mask" @click="showEq = false"></div>
-      <div v-if="showEq" class="mp-sheet">
-        <div class="sheet-grabber"></div>
+      <!-- 均衡器弹层（竖屏从按钮展开为卡片；横屏为右侧抽屉。标题由面板自带） -->
+      <MobileSheet :show="showEq" @update:show="showEq = $event">
         <MobileEqPanel />
-        <div class="sheet-bottom-space"></div>
-      </div>
+      </MobileSheet>
 
-      <!-- 高级音效弹层（功能列表 → 单项详细配置；横屏自动变为右侧抽屉） -->
-      <div v-if="showFx" class="mp-sheet-mask" @click="showFx = false"></div>
-      <div v-if="showFx" class="mp-sheet">
-        <div class="sheet-grabber"></div>
+      <!-- 高级音效弹层（功能列表 → 单项详细配置，标题由面板自带） -->
+      <MobileSheet :show="showFx" @update:show="showFx = $event">
         <MobileFxPanel in-sheet />
-        <div class="sheet-bottom-space"></div>
-      </div>
+      </MobileSheet>
 
-      <!-- 更多操作弹层（仅竖屏；横屏使用独立居中功能面板） -->
-      <div v-if="showActions && !isLandscape" class="mp-sheet-mask" @click="showActions = false"></div>
-      <div v-if="showActions && !isLandscape" class="mp-sheet">
-        <div class="sheet-grabber"></div>
-        <div class="sheet-title">更多</div>
+      <!-- 更多操作弹层（仅竖屏；横屏使用独立功能面板） -->
+      <MobileSheet
+        v-if="!isLandscape"
+        :show="showActions"
+        title="更多"
+        meta="MORE"
+        @update:show="showActions = $event"
+      >
         <div class="action-list">
           <div class="action-item" @click="openAddToPlaylist">
             <i class="mgc_playlist_line"></i>
@@ -1125,17 +1465,23 @@ watch(
             <i class="mgc_magic_1_line"></i>
             <span>高级</span>
           </div>
+          <div class="action-item" @click="openDownload">
+            <i class="mgc_download_2_line"></i>
+            <span>下载</span>
+          </div>
           <div class="action-item cancel" @click="showActions = false">
             <span>取消</span>
           </div>
         </div>
-      </div>
+      </MobileSheet>
 
       <!-- 添加到本地歌单弹层 -->
-      <div v-if="showAddPlaylist" class="mp-sheet-mask" @click="showAddPlaylist = false"></div>
-      <div v-if="showAddPlaylist" class="mp-sheet">
-        <div class="sheet-grabber"></div>
-        <div class="sheet-title">添加到本地歌单</div>
+      <MobileSheet
+        :show="showAddPlaylist"
+        title="添加到本地歌单"
+        meta="MY PLAYLISTS"
+        @update:show="showAddPlaylist = $event"
+      >
         <div v-if="creatingPlaylist" class="new-pl-form">
           <input
             v-model="newPlaylistName"
@@ -1166,16 +1512,89 @@ watch(
             <span>取消</span>
           </div>
         </div>
-      </div>
+      </MobileSheet>
+
+      <!-- 下载弹层 -->
+      <MobileSheet
+        :show="showDownload"
+        title="下载"
+        meta="EXPORT"
+        @update:show="closeDownload"
+      >
+        <div class="dl-song">
+          {{ song?.title || '未知歌曲' }}<span v-if="song?.artist"> · {{ song.artist }}</span>
+        </div>
+        <div class="dl-list">
+          <div
+            class="dl-item"
+            :class="{ 'is-disabled': !downloadAvailable.audio }"
+            @click="toggleDownloadOption('audio')"
+          >
+            <span class="dl-check" :class="{ on: downloadOptions.audio }">
+              <i v-if="downloadOptions.audio" class="mgc_check_line"></i>
+            </span>
+            <span class="dl-label">音频文件</span>
+            <span class="dl-note">
+              {{ downloadAvailable.audio
+                ? (downloadAvailable.audioExt || '.mp3').replace('.', '').toUpperCase()
+                : '无本地音频' }}
+            </span>
+          </div>
+          <div
+            class="dl-item"
+            :class="{ 'is-disabled': !downloadAvailable.lyrics }"
+            @click="toggleDownloadOption('lyrics')"
+          >
+            <span class="dl-check" :class="{ on: downloadOptions.lyrics }">
+              <i v-if="downloadOptions.lyrics" class="mgc_check_line"></i>
+            </span>
+            <span class="dl-label">歌词文件</span>
+            <span class="dl-note">{{ downloadAvailable.lyrics ? 'LRC' : '暂无歌词' }}</span>
+          </div>
+          <div
+            class="dl-item"
+            :class="{ 'is-disabled': !downloadAvailable.ai }"
+            @click="toggleDownloadOption('ai')"
+          >
+            <span class="dl-check" :class="{ on: downloadOptions.ai }">
+              <i v-if="downloadOptions.ai" class="mgc_check_line"></i>
+            </span>
+            <span class="dl-label">AI 翻译歌词</span>
+            <span class="dl-note">{{ downloadAvailable.ai ? '含译文 LRC' : '未生成' }}</span>
+          </div>
+          <div
+            class="dl-item"
+            :class="{ 'is-disabled': !downloadAvailable.karaoke }"
+            @click="toggleDownloadOption('karaoke')"
+          >
+            <span class="dl-check" :class="{ on: downloadOptions.karaoke }">
+              <i v-if="downloadOptions.karaoke" class="mgc_check_line"></i>
+            </span>
+            <span class="dl-label">逐字歌词</span>
+            <span class="dl-note">{{ downloadAvailable.karaoke ? '增强 LRC' : '未生成' }}</span>
+          </div>
+        </div>
+        <div class="dl-actions">
+          <button
+            class="mp-btn-primary dl-btn"
+            :disabled="downloadLoading || !downloadCount"
+            @click="confirmDownload"
+          >
+            {{ downloadLoading ? '正在导出…' : '选择目录并下载' }}
+          </button>
+        </div>
+        <div class="dl-hint">会打开系统目录选择器，文件保存到你选择的文件夹。</div>
+      </MobileSheet>
 
       <!-- 歌词分类弹层（层级：歌词 → 在线歌词 / 本地逐字歌词 → 生成算法） -->
-      <div v-if="lyricSheet" class="mp-sheet-mask" @click="closeLyricSheet"></div>
-      <div v-if="lyricSheet" class="mp-sheet">
-        <div class="sheet-grabber"></div>
-
+      <MobileSheet
+        :show="!!lyricSheet"
+        :title="lyricSheetTitle"
+        meta="LYRICS"
+        @update:show="!$event && closeLyricSheet()"
+      >
         <!-- 第一级：歌词 -->
         <template v-if="lyricSheet === 'root'">
-          <div class="sheet-title">歌词</div>
           <div class="action-list">
             <div class="action-item" @click="lyricSheet = 'online'">
               <i class="mgc_download_2_line"></i>
@@ -1187,12 +1606,16 @@ watch(
               <span>本地逐字歌词</span>
               <i class="mgc_right_line action-arrow"></i>
             </div>
+            <div class="action-item" @click="lyricSheet = 'ai'">
+              <i class="mgc_magic_1_line"></i>
+              <span>AI 歌词翻译</span>
+              <i class="mgc_right_line action-arrow"></i>
+            </div>
           </div>
         </template>
 
         <!-- 第二级：在线歌词 -->
         <template v-else-if="lyricSheet === 'online'">
-          <div class="sheet-title">在线歌词</div>
           <div class="action-list">
             <div v-if="isLocalSong" class="action-item" @click="openLyricSearch">
               <i class="mgc_download_2_line"></i>
@@ -1212,7 +1635,6 @@ watch(
 
         <!-- 第二级：本地逐字歌词 -->
         <template v-else-if="lyricSheet === 'local'">
-          <div class="sheet-title">本地逐字歌词</div>
           <div class="action-list">
             <div class="action-item">
               <i class="mgc_font_line"></i>
@@ -1264,7 +1686,6 @@ watch(
 
         <!-- 三级：自动生成算法 -->
         <template v-else-if="lyricSheet === 'autoAlgo'">
-          <div class="sheet-title">自动生成算法</div>
           <div class="action-list">
             <div class="action-item" @click="settingsStore.karaoke.lastAlgo = 'v3'">
               <i
@@ -1295,7 +1716,6 @@ watch(
 
         <!-- 三级：生成时机 -->
         <template v-else-if="lyricSheet === 'genMode'">
-          <div class="sheet-title">生成时机</div>
           <div class="action-list">
             <div class="action-item" @click="setGenMode('whilePlaying')">
               <i
@@ -1326,7 +1746,6 @@ watch(
 
         <!-- 三级：生成完后 -->
         <template v-else-if="lyricSheet === 'afterPlay'">
-          <div class="sheet-title">生成完后</div>
           <div class="action-list">
             <div class="action-item" @click="settingsStore.karaoke.afterGenPlay = 'restart'">
               <i
@@ -1356,8 +1775,49 @@ watch(
         </template>
 
         <!-- 第三级：选择生成算法 -->
+        <!-- AI 歌词翻译 -->
+        <template v-else-if="lyricSheet === 'ai'">
+          <div class="ai-panel">
+            <div class="ai-tip">
+              可填写歌曲背景或翻译要求（也可留空），AI 会逐行翻译当前歌词。
+            </div>
+            <textarea
+              v-model="aiRequirement"
+              class="ai-textarea"
+              rows="4"
+              :disabled="aiGenerating"
+              placeholder="例如：这是电影《…》的主题曲，讲述主角在异乡的思念；请用更口语、克制的中文翻译，保留人名与专有名词。"
+            ></textarea>
+            <div v-if="aiGenerating" class="ai-status">{{ aiStage || '正在翻译…' }}</div>
+            <button
+              class="mp-btn-primary ai-btn"
+              :disabled="aiGenerating"
+              @click="startAiTranslate"
+            >
+              {{ aiGenerating ? '正在翻译…' : '开始翻译' }}
+            </button>
+            <button
+              class="ai-clear-btn"
+              :disabled="aiGenerating || !hasAiTranslation"
+              @click="clearCurrentAiTranslate"
+            >
+              <i class="mgc_delete_line"></i>
+              清空当前 AI 翻译
+            </button>
+            <div class="ai-hint">
+              翻译结果会保存到应用私有目录 ai-lyrics/，可在「设置 → 本地与缓存」中管理；
+              若该曲已有逐字歌词，会询问是否用包含译文的逐行歌词重新生成逐字歌词。
+            </div>
+          </div>
+          <div class="action-list">
+            <div class="action-item cancel" @click="lyricSheet = 'root'">
+              <i class="mgc_left_line"></i>
+              <span>返回</span>
+            </div>
+          </div>
+        </template>
+
         <template v-else-if="lyricSheet === 'algo'">
-          <div class="sheet-title">选择生成算法</div>
           <div class="action-list">
             <div class="action-item algo-item" @click="pickAlgo('v3')">
               <i class="mgc_command_line"></i>
@@ -1379,8 +1839,7 @@ watch(
             </div>
           </div>
         </template>
-        <div class="sheet-bottom-space"></div>
-      </div>
+      </MobileSheet>
 
       <!-- 横屏「更多」功能面板：独立居中弹窗（不复用底部弹层），宫格式完整功能菜单 -->
       <div v-if="showActions && isLandscape" class="ls-more-mask" @click="showActions = false"></div>
@@ -1428,16 +1887,22 @@ watch(
             <span class="ls-more-icon"><i class="mgc_quill_pen_line"></i></span>
             <span class="ls-more-label">歌词</span>
           </button>
+          <button class="ls-more-item" @click="openDownload">
+            <span class="ls-more-icon"><i class="mgc_download_2_line"></i></span>
+            <span class="ls-more-label">下载</span>
+          </button>
         </div>
       </div>
 
-      <!-- 播放队列弹层（横屏自动变为右侧抽屉） -->
-      <div v-if="showQueue" class="mp-sheet-mask" @click="showQueue = false"></div>
-      <div v-if="showQueue" class="mp-sheet">
-        <div class="sheet-grabber"></div>
+      <!-- 播放队列 -->
+      <MobileSheet
+        :show="showQueue"
+        :title="`播放队列 · ${player.playlist.length} 首`"
+        meta="PLAY QUEUE"
+        @update:show="showQueue = $event"
+      >
         <div class="sheet-title-row">
-          <span class="sheet-title">播放队列 · {{ player.playlist.length }} 首</span>
-          <span class="sheet-clear" @click="clearQueue">清空</span>
+          <span class="sheet-clear" @click="clearQueue">清空队列</span>
         </div>
         <div class="sheet-scroll">
           <div
@@ -1453,13 +1918,15 @@ watch(
           </div>
           <n-empty v-if="!player.playlist.length" description="队列为空" style="padding: 40px 0" />
         </div>
-      </div>
+      </MobileSheet>
 
-      <!-- 评论弹层（横屏自动变为右侧抽屉） -->
-      <div v-if="showComments" class="mp-sheet-mask" @click="showComments = false"></div>
-      <div v-if="showComments" class="mp-sheet">
-        <div class="sheet-grabber"></div>
-        <div class="sheet-title">评论 · {{ commentsTotal }}</div>
+      <!-- 评论 -->
+      <MobileSheet
+        :show="showComments"
+        :title="`评论 · ${commentsTotal}`"
+        meta="COMMENTS"
+        @update:show="showComments = $event"
+      >
         <div class="sheet-scroll">
           <div v-for="c in comments" :key="c.commentId" class="comment-item">
             <img :src="c.user.avatarUrl" class="comment-avatar" loading="lazy" />
@@ -1482,13 +1949,15 @@ watch(
           </div>
           <n-empty v-if="!commentsLoading && !comments.length" description="暂无评论" style="padding: 40px 0" />
         </div>
-      </div>
+      </MobileSheet>
 
-      <!-- 在线歌词：搜索候选歌曲弹层 -->
-      <div v-if="showLyricSearch" class="mp-sheet-mask" @click="showLyricSearch = false"></div>
-      <div v-if="showLyricSearch" class="mp-sheet">
-        <div class="sheet-grabber"></div>
-        <div class="sheet-title">获取在线歌词</div>
+      <!-- 在线歌词：搜索候选歌曲 -->
+      <MobileSheet
+        :show="showLyricSearch"
+        title="获取在线歌词"
+        meta="SEARCH LYRICS"
+        @update:show="showLyricSearch = $event"
+      >
         <div class="lyric-search-bar">
           <div class="mp-input lyric-search-input">
             <i class="mgc_search_line"></i>
@@ -1521,14 +1990,15 @@ watch(
             <n-empty v-if="!lyricResults.length" description="输入关键词搜索在线歌曲" style="padding: 40px 0" />
           </template>
         </div>
-        <div class="sheet-bottom-space"></div>
-      </div>
+      </MobileSheet>
 
-      <!-- 在线歌词：预览与保存弹层 -->
-      <div v-if="showLyricPreview" class="mp-sheet-mask" @click="showLyricPreview = false"></div>
-      <div v-if="showLyricPreview" class="mp-sheet">
-        <div class="sheet-grabber"></div>
-        <div class="sheet-title">歌词预览</div>
+      <!-- 在线歌词：预览与保存 -->
+      <MobileSheet
+        :show="showLyricPreview"
+        title="歌词预览"
+        meta="PREVIEW"
+        @update:show="showLyricPreview = $event"
+      >
         <div class="lyric-preview-song">{{ previewSongTitle }}</div>
         <div class="sheet-scroll lyric-preview-scroll">
           <div v-if="lyricPreviewLoading" class="mp-loading"><n-spin size="small" /></div>
@@ -1542,30 +2012,198 @@ watch(
             {{ lyricSaving ? '保存中…' : '保存歌词到本地' }}
           </button>
         </div>
-        <div class="sheet-bottom-space"></div>
-      </div>
+      </MobileSheet>
     </div>
   </Teleport>
 </template>
 
 <style scoped>
+/* ==================== AI 歌词翻译 ==================== */
+.ai-panel {
+  padding: 0 20px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ai-tip {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--mp-text-2, rgba(60, 60, 67, 0.6));
+}
+
+.ai-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 96px;
+  padding: 10px 12px;
+  border: none;
+  border-radius: var(--mp-r-md, 16px);
+  background: var(--mp-fill, rgba(120, 120, 128, 0.12));
+  color: var(--mp-text, #1c1c1e);
+  font-size: 13.5px;
+  line-height: 1.5;
+  resize: none;
+  outline: none;
+  font-family: inherit;
+}
+
+.ai-textarea::placeholder {
+  color: var(--mp-text-3, rgba(60, 60, 67, 0.33));
+}
+
+.ai-status {
+  font-size: 12.5px;
+  color: var(--mp-primary, #2c8efd);
+}
+
+.ai-btn {
+  height: 44px;
+  width: 100%;
+}
+
+.ai-btn:disabled {
+  opacity: 0.55;
+}
+
+.ai-clear-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  height: 42px;
+  border: none;
+  border-radius: var(--mp-r-pill, 999px);
+  background: var(--mp-fill, rgba(120, 120, 128, 0.12));
+  color: var(--mp-danger, #ff3b30);
+  font-size: 13.5px;
+  font-weight: 600;
+  transition: opacity 0.15s ease;
+}
+
+.ai-clear-btn:disabled {
+  opacity: 0.45;
+}
+
+.dl-song {
+  padding: 0 20px 10px;
+  font-size: 13px;
+  color: var(--mp-text-3, rgba(60, 60, 67, 0.6));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dl-list {
+  padding: 0 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.dl-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: var(--mp-r-md, 20px);
+  background: var(--mp-fill, rgba(120, 120, 128, 0.12));
+  color: var(--mp-text, #1c1c1e);
+  font-size: 15px;
+}
+
+.dl-item:active {
+  opacity: 0.7;
+}
+
+.dl-item.is-disabled {
+  opacity: 0.42;
+}
+
+.dl-check {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1.5px solid var(--mp-text-3, rgba(60, 60, 67, 0.33));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.dl-check.on {
+  background: var(--mp-primary, #2c8efd);
+  border-color: var(--mp-primary, #2c8efd);
+  color: #fff;
+}
+
+.dl-label {
+  flex: 1;
+}
+
+.dl-note {
+  font-size: 12px;
+  color: var(--mp-text-3, rgba(60, 60, 67, 0.6));
+}
+
+.dl-actions {
+  padding: 14px 18px 6px;
+}
+
+.dl-btn {
+  width: 100%;
+  height: 46px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.dl-hint {
+  padding: 2px 20px 0;
+  font-size: 12px;
+  color: var(--mp-text-3, rgba(60, 60, 67, 0.6));
+  text-align: center;
+  line-height: 1.4;
+}
+
+.ai-hint {
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--mp-text-3, rgba(60, 60, 67, 0.33));
+}
+
 /* ============ 全屏封面背景 + 高斯模糊 ============ */
 .player-page {
   position: fixed;
   inset: 0;
   z-index: 1500;
   overflow: hidden;
-  background: #101014;
-  animation: page-slide-up 0.34s cubic-bezier(0.32, 0.72, 0.35, 1);
+  background: transparent;
+  /* 上下切换：未打开时停在屏幕下方，打开后滑上来；关闭时滑回去 */
+  transform: translateY(100%);
+  transition: transform 340ms cubic-bezier(0.32, 0.72, 0.35, 1);
   will-change: transform;
   overscroll-behavior: none;
+}
+
+.player-page.is-open {
+  transform: translateY(0);
 }
 
 .bg-layer {
   position: absolute;
   inset: 0;
-  z-index: 0;
+  z-index: 1;
   overflow: hidden;
+  background: #15161a;
 }
 
 /* 封面等比铺满并外扩，自身高斯模糊（边缘不外露、无 backdrop-filter 闪烁） */
@@ -1593,25 +2231,16 @@ watch(
   );
 }
 
-.player-page.closing {
-  animation: page-slide-down 0.28s cubic-bezier(0.32, 0.72, 0.35, 1) forwards;
-}
-
-@keyframes page-slide-up {
-  from {
-    transform: translateY(100%);
-  }
-}
-
-@keyframes page-slide-down {
-  to {
-    transform: translateY(100%);
-  }
+.player-page.closing .page-body {
+  /* 关闭时保持内容可见：整页一起滑下去，而不是先淡成一张空背景 */
+  opacity: 1;
+  transform: translateY(0);
+  transition: none;
 }
 
 .page-body {
   position: relative;
-  z-index: 1;
+  z-index: 2;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -1621,6 +2250,21 @@ watch(
     calc(10px + var(--sab, 0px))
     calc(22px + var(--sal, 0px));
   box-sizing: border-box;
+  opacity: 0;
+  transform: translateY(10px);
+  /* 整页内容只做透明度 + 位移：filter 过渡在低端安卓 WebView 上会掉帧，
+     模糊入场留给卡片外壳，视觉上依旧是「卡片长出来后内容浮现」 */
+  transition:
+    opacity 160ms ease,
+    transform 240ms ease;
+}
+
+.player-page.is-open .page-body {
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity 300ms ease 240ms,
+    transform 520ms cubic-bezier(0.22, 1, 0.36, 1) 200ms;
 }
 
 /* ============ 顶部 ============ */
@@ -1765,52 +2409,7 @@ watch(
   height: 40vh;
 }
 
-.lyric-line {
-  padding: 11px 8px;
-  opacity: var(--lyric-dim-opacity, 0.38);
-  filter: blur(var(--lyric-blur, 0px));
-  transition:
-    opacity 0.35s ease,
-    filter 0.35s ease;
-  transform-origin: left center;
-}
-
-.lyric-line.active {
-  opacity: 1;
-  filter: none;
-}
-
-/* 歌词排版关键设计：布局尺寸恒等于激活尺寸（20px/700），
-   非激活行用 transform: scale 视觉缩小。
-   这样每句歌词的换行位置永远提前按放大后的最大字号算好，
-   激活时只有 transform 变化，不会边放大边重排换行。
-   注：字号/颜色/字重/行距均可被「播放页歌词展示」设置的 CSS 变量覆盖 */
-.lyric-text {
-  color: var(--lyric-color, #fff);
-  font-size: var(--lyric-font-size, 20px);
-  font-weight: var(--lyric-font-weight, 700);
-  font-family: var(--lyric-font-family, inherit);
-  line-height: var(--lyric-line-height, 1.55);
-  text-align: left;
-  transform: scale(0.85);
-  transform-origin: left center;
-  transition: transform 0.3s ease;
-}
-
-.lyric-line.active .lyric-text {
-  color: var(--lyric-active-color, var(--lyric-color, #fff));
-  transform: scale(1);
-  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
-}
-
-.lyric-ttext {
-  color: var(--lyric-sub-color, rgba(255, 255, 255, 0.6));
-  font-size: calc(var(--lyric-font-size, 20px) * 0.675);
-  font-family: var(--lyric-font-family, inherit);
-  line-height: 1.5;
-  margin-top: 3px;
-  text-align: left;
-}
+/* 单行歌词的样式在 MobileLyricLine.vue 内（子组件隔离渲染，换行只更新相邻两行） */
 
 .no-lyric {
   flex: 1;
@@ -1870,37 +2469,7 @@ watch(
   border-radius: 3px;
 }
 
-/* ============ 进度 ============ */
-.progress-area {
-  flex-shrink: 0;
-  margin-top: 4px;
-}
-
-.progress-slider :deep(.n-slider-rail) {
-  height: 4px !important;
-  border-radius: var(--mp-r-pill, 999px) !important;
-  background: rgba(255, 255, 255, 0.22) !important;
-}
-
-.progress-slider :deep(.n-slider-rail__fill) {
-  background: #fff !important;
-  border-radius: var(--mp-r-pill, 999px) !important;
-}
-
-.progress-slider :deep(.n-slider-handle) {
-  width: 13px !important;
-  height: 13px !important;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35) !important;
-}
-
-.time-row {
-  display: flex;
-  justify-content: space-between;
-  color: rgba(255, 255, 255, 0.55);
-  font-size: 11px;
-  margin-top: 2px;
-  font-variant-numeric: tabular-nums;
-}
+/* ============ 进度（样式在 MobileProgressBar 内） ============ */
 
 /* ============ 主控制 ============ */
 .controls {
@@ -2131,47 +2700,13 @@ watch(
   color: var(--mp-text-3, rgba(60, 60, 67, 0.33));
 }
 
-/* ============ 逐字歌词高亮（Apple Music 风格逐词填充） ============
-   双层原生文本、像素级重合：底层为原文（原生文本填充，加粗/字体与逐行一致），
-   上层为同一文本的高亮副本，按演唱进度 --p 裁剪显示。
-   inline-block + white-space:pre 保证两层的基线、字距完全对齐（无重影），
-   同时保留词尾空格宽度；中文换行由词间的零宽空格提供断行点 */
-.lyric-word {
-  position: relative;
-  display: inline-block;
-  white-space: pre;
-}
-
-/* 关键：全局存在 *,*:before,*:after{font-weight:400} 的重置，
-   会直接命中词/层元素并覆盖继承，导致逐字歌词字重变细；
-   这里显式继承 .lyric-text 的字重（跟主行一致） */
-.lyric-word,
-.lw-base,
-.lw-fill {
-  font-weight: inherit;
-}
-
-/* 未唱部分压低亮度（与行提亮同步过渡，激活时不闪暗） */
-.lyric-line.active .lw-base {
-  opacity: 0.6;
-  transition: opacity 0.35s ease;
-}
-
-.lw-fill {
-  position: absolute;
-  left: 0;
-  top: 0;
-  white-space: pre;
-  color: var(--lyric-active-color, #fff);
-  clip-path: inset(0 calc(100% - var(--p, 0%)) 0 0);
-  pointer-events: none;
-}
+/* 逐字歌词双层文本的样式在 MobileLyricLine.vue 内 */
 
 .sheet-title-row {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
-  padding: 8px 18px 12px;
+  padding: 0 2px 10px;
 }
 
 .sheet-clear {
@@ -2480,6 +3015,8 @@ watch(
     max-width: 100%;
     width: auto;
     aspect-ratio: 1 / 1;
+    /* 居中容器里给右侧留白 → 封面整体左移 23px，修正横屏下的偏右观感 */
+    margin-right: 46px;
   }
 
   .mini-lyric,
@@ -2504,8 +3041,9 @@ watch(
   }
 
   /* 横屏布局字号同样恒等于激活尺寸，缩放比例不变；
-     遵循「播放页歌词展示」字号设置并略微缩小适配横屏 */
-  .lyric-text {
+     遵循「播放页歌词展示」字号设置并略微缩小适配横屏。
+     歌词行是子组件，需要 :deep 才能命中其内部元素 */
+  .lyric-stage :deep(.lyric-text) {
     font-size: calc(var(--lyric-font-size, 20px) * 0.875);
   }
 

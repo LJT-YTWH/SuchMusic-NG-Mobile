@@ -7,7 +7,10 @@ import { usePlayerStore, type PlayerSong } from '../../stores/playerStore'
 import { useLocalMusicStore, type LocalSong } from '../../stores/localMusicStore'
 import MobileSongRow from '../components/MobileSongRow.vue'
 import MobileCover from '../components/MobileCover.vue'
+import MobileCoverFlow, { type CoverFlowItem } from '../components/MobileCoverFlow.vue'
 import defaultCover from '@renderer/assets/icon.png'
+import { useVirtualRows } from '../composables/useVirtualRows'
+import { useLibraryLayout } from '../composables/useLibraryLayout'
 
 const route = useRoute()
 const router = useRouter()
@@ -46,6 +49,15 @@ function mapTrack(t: PlaylistTrack): PlayerSong {
 }
 
 const songs = computed<PlayerSong[]>(() => (playlist.value?.tracks || []).map(mapTrack))
+
+// 长列表虚拟滚动：超过 120 首只渲染可视区域（可在设置中关闭）
+const {
+  visibleItems: visibleSongs,
+  startIndex: virtualStart,
+  paddingTop: listPaddingTop,
+  paddingBottom: listPaddingBottom,
+  onScroll: onListScroll
+} = useVirtualRows({ items: songs })
 
 const playAll = (): void => {
   if (!songs.value.length) return
@@ -154,12 +166,60 @@ function moveTo(targetId: string): void {
   showMovePicker.value = false
   rowActionSong.value = null
 }
+
+// ==================== 横屏 Cover Flow：歌单内的歌曲浏览 ====================
+// 用户在「设置 → 偏好 → 横屏浏览歌单方式」选择 Cover Flow 后，
+// 横屏进入歌单详情也以 3D 封面流展示歌曲（默认仍为传统列表）。
+
+const { useCoverFlowNow } = useLibraryLayout()
+
+const flowItems = computed<CoverFlowItem[]>(() =>
+  songs.value.map((s, i) => ({
+    id: `${String(s.id)}#${i}`,
+    title: s.title,
+    subtitle: s.artist,
+    cover: s.cover || cover.value,
+    badge: s.album || `${i + 1} / ${songs.value.length}`
+  }))
+)
+
+const flowActive = computed(
+  () => useCoverFlowNow.value && !!playlist.value && !showAddSongs.value && flowItems.value.length > 0
+)
+
+const flowStartIndex = computed(() => {
+  const idx = songs.value.findIndex((s) => String(s.id) === String(player.currentSong?.id))
+  return idx < 0 ? 0 : idx
+})
+
+function onFlowSelect(_item: CoverFlowItem, index: number): void {
+  const song = songs.value[index]
+  if (song) playAt(song)
+}
 </script>
 
 <template>
   <!-- 单一根节点：<Transition mode="out-in"> 要求元素根，否则页面切换会卡住变空白 -->
-  <div class="mp-page detail-page">
+  <div class="mp-page detail-page" :class="{ 'cf-mode': flowActive }">
     <template v-if="playlist">
+      <!-- 横屏 + Cover Flow：整页 3D 封面流展示歌单内的歌曲 -->
+      <MobileCoverFlow
+        v-if="flowActive"
+        :items="flowItems"
+        :label="playlist.name"
+        :eyebrow="`${songs.length} 首 · 本地歌单`"
+        :start-index="flowStartIndex"
+        show-brand
+        @select="onFlowSelect"
+      >
+        <template #lead>
+          <button class="cf-back" type="button" aria-label="返回" @click="router.back()">
+            <i class="mgc_arrow_left_line"></i>
+          </button>
+        </template>
+      </MobileCoverFlow>
+
+      <template v-else>
       <!-- 头部：封面全幅拉伸 + 毛玻璃模糊（与歌单广场详情一致） -->
       <div class="header">
         <img :src="bgCover" class="header-bg" alt="" />
@@ -186,13 +246,14 @@ function moveTo(targetId: string): void {
         <span class="play-count">({{ songs.length }})</span>
       </div>
 
-      <div class="mp-scroll">
+      <div class="mp-scroll" @scroll.passive="onListScroll">
         <div class="mp-list list-card" v-if="songs.length">
+          <div v-if="listPaddingTop" class="v-spacer" :style="{ height: listPaddingTop + 'px' }"></div>
           <MobileSongRow
-            v-for="(song, i) in songs"
-            :key="`${song.id}-${i}`"
+            v-for="(song, i) in visibleSongs"
+            :key="`${song.id}-${virtualStart + i}`"
             :song="song"
-            :index="i"
+            :index="virtualStart + i"
             show-index
             :playing="String(player.currentSong?.id) === String(song.id)"
             @click="playAt"
@@ -202,6 +263,7 @@ function moveTo(targetId: string): void {
               <i class="mgc_more_2_line row-more"></i>
             </template>
           </MobileSongRow>
+          <div v-if="listPaddingBottom" class="v-spacer" :style="{ height: listPaddingBottom + 'px' }"></div>
         </div>
         <n-empty
           v-if="!songs.length"
@@ -210,6 +272,7 @@ function moveTo(targetId: string): void {
         />
         <div class="bottom-pad"></div>
       </div>
+      </template>
     </template>
 
     <div v-else class="not-found">
@@ -661,5 +724,26 @@ function moveTo(targetId: string): void {
 .back-link {
   color: var(--mp-primary);
   font-size: 14px;
+}
+
+/* Cover Flow 模式下左上角的返回按钮 */
+.cf-back {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  margin-right: 2px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--mp-fill);
+  color: var(--mp-text);
+  font-size: 18px;
+  transition: transform 0.15s cubic-bezier(0.32, 0.72, 0.35, 1);
+}
+
+.cf-back:active {
+  transform: scale(0.9);
 }
 </style>

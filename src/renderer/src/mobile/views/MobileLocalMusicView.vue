@@ -3,8 +3,13 @@ import { ref, computed, onMounted } from 'vue'
 import { NSpin, NEmpty, useMessage, useDialog } from 'naive-ui'
 import { useLocalMusicStore, type LocalSong } from '../../stores/localMusicStore'
 import { usePlayerStore, type PlayerSong } from '../../stores/playerStore'
-import { usePlaylistStore } from '../../stores/playlistStore'
+import { usePlaylistStore, type PlaylistTrack } from '../../stores/playlistStore'
 import MobileSongRow from '../components/MobileSongRow.vue'
+import MobileCoverFlow, { type CoverFlowItem } from '../components/MobileCoverFlow.vue'
+import LayoutModeToggle from '../components/LayoutModeToggle.vue'
+import { useVirtualRows } from '../composables/useVirtualRows'
+import { useLibraryLayout } from '../composables/useLibraryLayout'
+import { useLandscape } from '../composables/useLandscape'
 
 const localStore = useLocalMusicStore()
 const player = usePlayerStore()
@@ -41,6 +46,17 @@ function mapSong(s: LocalSong): PlayerSong {
 }
 
 const playerSongs = computed(() => songs.value.map(mapSong))
+
+// 长列表虚拟滚动：本地曲库可能上千首，仅渲染可视区域
+// 横屏下列表是双列网格，虚拟滚动必须按「行」计算（每行 2 首）
+const { isLandscape } = useLandscape()
+const listColumns = computed(() => (isLandscape.value ? 2 : 1))
+const {
+  visibleItems: visiblePlayerSongs,
+  paddingTop: listPaddingTop,
+  paddingBottom: listPaddingBottom,
+  onScroll: onListScroll
+} = useVirtualRows({ items: playerSongs, columns: listColumns })
 
 async function rescan(): Promise<void> {
   try {
@@ -149,17 +165,40 @@ function removeSelected(): void {
   })
 }
 
-// 批量保存为歌单
+// 批量保存为歌单（新建 或 追加到已有歌单）
 const showSavePlaylist = ref(false)
 const newPlaylistName = ref('')
+
+function trackOf(song: PlayerSong): PlaylistTrack {
+  return {
+    id: song.id,
+    title: song.title,
+    artist: song.artist,
+    album: song.album,
+    cover: song.cover,
+    filePath: song.filePath,
+    durationMs: song.durationMs,
+    source: song.source,
+    sourceSongId: song.sourceSongId
+  }
+}
 
 function openSavePlaylist(): void {
   if (!selectedSongs.value.length) {
     message.info('请先选择歌曲')
     return
   }
+  // 已有歌单列表可能来自其他页面，打开时重新读一次本地存储
+  playlistStore.loadFromStorage()
   newPlaylistName.value = ''
   showSavePlaylist.value = true
+}
+
+function finishSavePlaylist(): void {
+  showSavePlaylist.value = false
+  newPlaylistName.value = ''
+  selected.value = new Set()
+  selectMode.value = false
 }
 
 function confirmSavePlaylist(): void {
@@ -169,25 +208,37 @@ function confirmSavePlaylist(): void {
     return
   }
   try {
-    const tracks = selectedSongs.value.map((s) => ({
-      id: s.id,
-      title: s.title,
-      artist: s.artist,
-      album: s.album,
-      cover: s.cover,
-      filePath: s.filePath,
-      durationMs: s.durationMs,
-      source: s.source,
-      sourceSongId: s.sourceSongId
-    }))
+    const tracks = selectedSongs.value.map(trackOf)
     playlistStore.createPlaylistFromTracks(name, tracks, tracks[0]?.cover)
-    showSavePlaylist.value = false
-    selected.value = new Set()
-    selectMode.value = false
+    finishSavePlaylist()
     message.success(`已创建歌单「${name}」（${tracks.length} 首）`)
   } catch (e) {
     message.error(e instanceof Error ? e.message : '创建歌单失败')
   }
+}
+
+/** 把选中的歌曲追加到已有歌单（自动跳过重复曲目） */
+function addSelectedToPlaylist(playlistId: string): void {
+  const pl = playlistStore.playlists.find((p) => p.id === playlistId)
+  if (!pl) {
+    message.error('歌单不存在')
+    return
+  }
+  let added = 0
+  let exists = 0
+  for (const song of selectedSongs.value) {
+    const r = playlistStore.addTrackToPlaylist(playlistId, trackOf(song))
+    if (r === 'added') added += 1
+    else if (r === 'exists') exists += 1
+  }
+  if (added > 0) {
+    message.success(
+      `已添加 ${added} 首到「${pl.name}」${exists ? `（${exists} 首已存在）` : ''}`
+    )
+  } else {
+    message.info(`所选歌曲都已在「${pl.name}」中`)
+  }
+  finishSavePlaylist()
 }
 
 function removeSong(song: PlayerSong): void {
@@ -208,6 +259,58 @@ function removeSong(song: PlayerSong): void {
   })
 }
 
+// ==================== 横屏 Cover Flow（按专辑浏览） ====================
+
+const { useCoverFlowNow } = useLibraryLayout()
+
+interface AlbumGroup {
+  key: string
+  name: string
+  artist: string
+  cover: string
+  songs: PlayerSong[]
+}
+
+/** 按「专辑 + 歌手」聚合本地歌曲：一个专辑一张封面 */
+const albums = computed<AlbumGroup[]>(() => {
+  const map = new Map<string, AlbumGroup>()
+  for (const song of playerSongs.value) {
+    const name = (song.album || '').trim() || '未知专辑'
+    const key = `${name}__${song.artist}`
+    let group = map.get(key)
+    if (!group) {
+      group = { key, name, artist: song.artist, cover: song.cover, songs: [] }
+      map.set(key, group)
+    }
+    group.songs.push(song)
+    if (!group.cover && song.cover) group.cover = song.cover
+  }
+  return [...map.values()].sort((a, b) => b.songs.length - a.songs.length)
+})
+
+const flowItems = computed<CoverFlowItem[]>(() =>
+  albums.value.map((album) => ({
+    id: album.key,
+    title: album.name,
+    subtitle: `${album.artist} · ${album.songs.length} 首`,
+    cover: album.cover,
+    badge: `${album.songs.length} TRACKS`
+  }))
+)
+
+const flowActive = computed(
+  () => useCoverFlowNow.value && !selectMode.value && albums.value.length > 0
+)
+
+/** 点击居中的专辑封面：整张专辑加入播放列表并开始播放 */
+const onFlowSelect = (item: CoverFlowItem): void => {
+  const album = albums.value.find((a) => a.key === item.id)
+  if (!album || !album.songs.length) return
+  player.setPlaylistForSource('local', album.songs, true)
+  player.playSongAtIndex(0)
+  player.setPlayerPageShown(true)
+}
+
 onMounted(() => {
   if (!localStore.songs.length) {
     void rescan()
@@ -216,7 +319,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="mp-page">
+  <div class="mp-page" :class="{ 'cf-mode': flowActive }">
     <div class="mp-header mp-rise">
       <div>
         <div class="mp-title">{{ selectMode ? `已选 ${selected.size} 首` : '本地音乐' }}</div>
@@ -232,6 +335,7 @@ onMounted(() => {
           </button>
         </template>
         <template v-else>
+          <LayoutModeToggle />
           <button class="mp-btn-icon" title="批量管理" @click="toggleSelectMode">
             <i class="mgc_list_check_2_line"></i>
           </button>
@@ -245,14 +349,24 @@ onMounted(() => {
       </div>
     </div>
 
-    <div class="filter-bar mp-rise" style="--mp-rise-delay: 0.05s">
+    <!-- 横屏 Cover Flow：按专辑浏览本地曲库 -->
+    <MobileCoverFlow
+      v-if="flowActive"
+      :items="flowItems"
+      label="本地专辑"
+      eyebrow="ALBUMS"
+      :start-index="0"
+      @select="onFlowSelect"
+    />
+
+    <div v-else class="filter-bar mp-rise" style="--mp-rise-delay: 0.05s">
       <div class="mp-input filter-input">
         <i class="mgc_search_line"></i>
         <input v-model="filter" placeholder="搜索本地歌曲" />
       </div>
     </div>
 
-    <div class="mp-scroll">
+    <div v-if="!flowActive" class="mp-scroll" @scroll.passive="onListScroll">
       <div v-if="scanning" class="scan-loading">
         <n-spin size="medium" />
         <p>正在扫描本地音乐…</p>
@@ -260,8 +374,9 @@ onMounted(() => {
 
       <template v-else>
         <div class="mp-list mp-rise" style="--mp-rise-delay: 0.1s" v-if="playerSongs.length">
+          <div v-if="listPaddingTop" class="v-spacer" :style="{ height: listPaddingTop + 'px' }"></div>
           <MobileSongRow
-            v-for="song in playerSongs"
+            v-for="song in visiblePlayerSongs"
             :key="String(song.id)"
             :song="song"
             show-cover
@@ -279,6 +394,7 @@ onMounted(() => {
               <i v-else class="mgc_delete_line row-del"></i>
             </template>
           </MobileSongRow>
+          <div v-if="listPaddingBottom" class="v-spacer" :style="{ height: listPaddingBottom + 'px' }"></div>
         </div>
 
         <n-empty v-else description="暂无本地音乐，点击右上角扫描" style="padding: 60px 0" />
@@ -300,15 +416,32 @@ onMounted(() => {
 
     <!-- 存为歌单弹层 -->
     <div v-if="showSavePlaylist" class="mp-sheet-mask" @click="showSavePlaylist = false"></div>
-    <div v-if="showSavePlaylist" class="mp-sheet">
+    <div v-if="showSavePlaylist" class="mp-sheet save-sheet">
       <div class="sheet-grabber"></div>
       <div class="sheet-title">存为歌单（{{ selectedSongs.length }} 首）</div>
       <div class="save-form">
         <div class="mp-input">
           <i class="mgc_edit_2_line"></i>
-          <input v-model="newPlaylistName" placeholder="输入歌单名称" maxlength="40" />
+          <input v-model="newPlaylistName" placeholder="新建歌单名称" maxlength="40" />
         </div>
-        <button class="mp-btn-primary save-confirm" @click="confirmSavePlaylist">创建歌单</button>
+        <button class="mp-btn-primary save-confirm" @click="confirmSavePlaylist">新建并保存</button>
+      </div>
+
+      <div v-if="playlistStore.playlists.length" class="save-existing">
+        <div class="save-divider"><span>或添加到已有歌单</span></div>
+        <div class="save-pl-list">
+          <div
+            v-for="pl in playlistStore.playlists"
+            :key="pl.id"
+            class="save-pl-row"
+            @click="addSelectedToPlaylist(pl.id)"
+          >
+            <i :class="pl.id === 'favorite' ? 'mgc_heart_fill save-pl-heart' : 'mgc_playlist_line'"></i>
+            <span class="save-pl-name">{{ pl.name }}</span>
+            <span class="save-pl-count">{{ pl.tracks.length }} 首</span>
+            <i class="mgc_add_line save-pl-add"></i>
+          </div>
+        </div>
       </div>
       <div class="sheet-bottom-space"></div>
     </div>
@@ -316,6 +449,8 @@ onMounted(() => {
 </template>
 
 <style scoped>
+/* Cover Flow 使用透明背景，直接沿用页面主题色（不再铺深色舞台） */
+
 .filter-bar {
   padding: 4px 20px 8px;
 }
@@ -362,7 +497,7 @@ onMounted(() => {
   position: absolute;
   left: 16px;
   right: 16px;
-  bottom: calc(152px + var(--sab, 0px));
+  bottom: calc(96px + var(--sab, 0px));
   display: flex;
   gap: 12px;
   padding: 10px 12px;
@@ -422,6 +557,84 @@ onMounted(() => {
 .save-confirm {
   height: 44px;
   font-size: 15px;
+}
+
+/* 已有歌单：分割线 + 可滚动列表 */
+.save-existing {
+  padding: 10px 20px 4px;
+  min-height: 0;
+}
+
+.save-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  font-size: 11.5px;
+  color: var(--mp-text-3);
+}
+
+.save-divider::before,
+.save-divider::after {
+  content: '';
+  flex: 1;
+  height: 0.5px;
+  background: var(--mp-separator);
+}
+
+.save-pl-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 38vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+.save-pl-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: var(--mp-fill);
+  color: var(--mp-text);
+  font-size: 14.5px;
+  transition: opacity 0.15s ease;
+}
+
+.save-pl-row:active {
+  opacity: 0.7;
+}
+
+.save-pl-row > i:first-child {
+  font-size: 19px;
+  color: var(--mp-primary);
+}
+
+.save-pl-row > i.save-pl-heart {
+  color: #ff375f;
+}
+
+.save-pl-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.save-pl-count {
+  font-size: 12px;
+  color: var(--mp-text-3);
+  flex-shrink: 0;
+}
+
+.save-pl-add {
+  font-size: 18px;
+  color: var(--mp-text-3);
+  flex-shrink: 0;
 }
 
 /* ============ 横屏：过滤栏限宽居中，歌曲列表由全局规则双列 ============ */

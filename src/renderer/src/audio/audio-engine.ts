@@ -28,6 +28,8 @@ class WebAudioEngine {
   private msSideGain: number = 1 // M/S 矩阵：侧声道增益（立体声宽度）
   private crossfadeEnabled: boolean = false
   private crossfadeMs: number = 6000
+  /** 交叉淡化曲线：等功率（响度平滑）/ 线性（传统淡入淡出） */
+  private crossfadeCurve: 'equalPower' | 'linear' = 'equalPower'
   private endingFade: boolean = false // 已触发结尾淡出
   private currentSource: AudioBufferSourceNode | null = null
   private currentBuffer: AudioBuffer | null = null
@@ -214,14 +216,40 @@ class WebAudioEngine {
     this.endingFade = false
   }
 
-  private fadeTo(target: number, durationMs: number): void {
+  private fadeTo(
+    target: number,
+    durationMs: number,
+    curve: 'equalPower' | 'linear' = 'linear'
+  ): void {
     if (!this.audioContext || !this.gainNode) return
     const now = this.audioContext.currentTime
     const gain = this.gainNode.gain
-    const current = gain.value
     const durationSec = Math.max(durationMs, 0) / 1000
+    // 先取消既有自动化，再读取当前值，否则读到的是上一次排程的终值
     gain.cancelScheduledValues(now)
+    const current = gain.value
     gain.setValueAtTime(current, now)
+
+    // 目标与当前一致：直接保持，避免等功率曲线把它当成「淡出到 0」
+    if (Math.abs(target - current) < 1e-4) {
+      gain.setValueAtTime(target, now)
+      return
+    }
+
+    if (curve === 'equalPower' && durationSec > 0.05) {
+      // 等功率曲线：淡入 sin、淡出 cos，过渡期两端能量之和恒定，听感不会「掉一下」
+      const steps = 64
+      const values = new Float32Array(steps)
+      const fadingOut = target < current
+      for (let i = 0; i < steps; i += 1) {
+        const t = i / (steps - 1)
+        const factor = fadingOut ? Math.cos((t * Math.PI) / 2) : Math.sin((t * Math.PI) / 2)
+        values[i] = fadingOut ? current * factor : current + (target - current) * factor
+      }
+      gain.setValueCurveAtTime(values, now, durationSec)
+      return
+    }
+
     gain.linearRampToValueAtTime(target, now + durationSec)
   }
 
@@ -573,9 +601,14 @@ class WebAudioEngine {
   }
 
   // ---- 高级音效：交叉淡入淡出 ----
-  setCrossfade(enabled: boolean, seconds: number): void {
+  setCrossfade(
+    enabled: boolean,
+    seconds: number,
+    curve: 'equalPower' | 'linear' = 'equalPower'
+  ): void {
     this.crossfadeEnabled = enabled
     this.crossfadeMs = Math.min(Math.max(seconds, 1), 12) * 1000
+    this.crossfadeCurve = curve
   }
 
   // 歌曲起始淡入时长（未开交叉淡入淡出时保持 200ms 快速淡入）
@@ -590,7 +623,7 @@ class WebAudioEngine {
     const remaining = durationMs - positionMs
     if (remaining > 0 && remaining <= this.crossfadeMs) {
       this.endingFade = true
-      this.fadeTo(0, Math.max(remaining, 50))
+      this.fadeTo(0, Math.max(remaining, 50), this.crossfadeCurve)
     }
   }
 
@@ -651,7 +684,7 @@ class WebAudioEngine {
     if (this.currentBuffer) {
       this.playBuffer(this.currentBuffer, 0)
       this.gainNode!.gain.value = 0
-      this.fadeTo(this.volume, this.fadeInMs())
+      this.fadeTo(this.volume, this.fadeInMs(), this.crossfadeEnabled ? this.crossfadeCurve : 'linear')
     }
   }
 
@@ -696,7 +729,7 @@ class WebAudioEngine {
       }
       await this.mediaElement.play()
       this.gainNode!.gain.value = 0
-      this.fadeTo(this.volume, this.fadeInMs())
+      this.fadeTo(this.volume, this.fadeInMs(), this.crossfadeEnabled ? this.crossfadeCurve : 'linear')
     }
   }
 
@@ -711,7 +744,7 @@ class WebAudioEngine {
       }
       await this.mediaElement.play()
       this.gainNode!.gain.value = 0
-      this.fadeTo(this.volume, this.fadeInMs())
+      this.fadeTo(this.volume, this.fadeInMs(), this.crossfadeEnabled ? this.crossfadeCurve : 'linear')
     }
   }
 
@@ -822,7 +855,7 @@ class WebAudioEngine {
         // 结尾淡出后重播：恢复增益并淡入
         if (this.gainNode) {
           this.gainNode.gain.value = 0
-          this.fadeTo(this.volume, this.fadeInMs())
+          this.fadeTo(this.volume, this.fadeInMs(), this.crossfadeEnabled ? this.crossfadeCurve : 'linear')
         }
         return
       }
@@ -830,7 +863,7 @@ class WebAudioEngine {
         this.mediaElement.currentTime = 0
         if (this.gainNode) {
           this.gainNode.gain.value = 0
-          this.fadeTo(this.volume, this.fadeInMs())
+          this.fadeTo(this.volume, this.fadeInMs(), this.crossfadeEnabled ? this.crossfadeCurve : 'linear')
         }
         void this.mediaElement.play()
         return

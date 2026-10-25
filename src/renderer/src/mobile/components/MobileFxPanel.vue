@@ -167,6 +167,29 @@ const backToList = (): void => {
             <span style="left: 0">1s</span><span style="left: 45.45%">6s</span
             ><span style="left: 100%">12s</span>
           </div>
+          <div class="fx-sub-row">
+            <span class="fx-slider-label">淡化曲线</span>
+            <div class="curve-seg">
+              <span
+                class="curve-item"
+                :class="{ active: settingsStore.advancedFx.crossfadeCurve === 'equalPower' }"
+                @click="settingsStore.advancedFx.crossfadeCurve = 'equalPower'"
+              >
+                等功率
+              </span>
+              <span
+                class="curve-item"
+                :class="{ active: settingsStore.advancedFx.crossfadeCurve === 'linear' }"
+                @click="settingsStore.advancedFx.crossfadeCurve = 'linear'"
+              >
+                线性
+              </span>
+            </div>
+          </div>
+          <div class="fx-note">
+            等功率曲线让过渡期两端能量之和保持恒定，音量不会在中途「掉一下」（推荐）；
+            线性曲线更接近传统的淡出淡入。
+          </div>
         </template>
 
         <!-- 人声消除 -->
@@ -372,6 +395,29 @@ const backToList = (): void => {
   justify-content: space-between;
   align-items: center;
   margin-top: 14px;
+}
+
+.curve-seg {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--mp-fill, rgba(120, 120, 128, 0.12));
+}
+
+.curve-item {
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--mp-text-2, rgba(60, 60, 67, 0.6));
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.curve-item.active {
+  background: var(--mp-bg-elevated, #fff);
+  color: var(--mp-primary, #2c8efd);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 
 .fx-note {

@@ -105,9 +105,10 @@ body.is-mobile[data-theme='dark'] {
   }
 }
 
-/* 内容块入场（ stagger 用 --mp-rise-delay 控制延迟） */
+/* 内容块入场（ stagger 用 --mp-rise-delay 控制延迟）
+   缩短时长：大量列表块同时入场时，0.4s 的合成层会拖慢首帧 */
 body.is-mobile .mp-rise {
-  animation: mp-rise var(--mp-dur-slow) var(--mp-ease-out) both;
+  animation: mp-rise 0.3s var(--mp-ease-out) both;
   animation-delay: var(--mp-rise-delay, 0s);
 }
 
@@ -249,9 +250,8 @@ body.is-mobile .mp-imgcard .img-badge {
   position: absolute;
   top: 7px;
   right: 7px;
-  background: rgba(0, 0, 0, 0.35);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  /* 不要用 backdrop-filter：网格里每张卡一个模糊层，滑动时开销很大 */
+  background: rgba(0, 0, 0, 0.46);
   color: #fff;
   font-size: 10px;
   padding: 3px 8px;
@@ -678,7 +678,14 @@ body.is-mobile .mp-cell .cell-arrow {
 /* ==================== 通用 ==================== */
 
 body.is-mobile .mp-bottom-space {
-  height: 156px; /* 为悬浮底栏留出空间 */
+  /* 竖屏底栏：72px 胶囊 + 底部间距 + 安全区（原双条结构为 156px） */
+  height: calc(104px + var(--sab, 0px));
+  flex-shrink: 0;
+}
+
+/* 弹层底部安全区占位（弹层容器与页面内共用） */
+body.is-mobile .sheet-bottom-space {
+  height: calc(14px + var(--sab, 0px));
   flex-shrink: 0;
 }
 
@@ -707,6 +714,14 @@ body.is-mobile .mp-count {
   /* 内容区仅避让右侧挖孔/圆角（左侧由导航栏占用，含左安全区） */
   body.is-mobile .mp-page {
     padding-right: var(--sar, 0px);
+  }
+
+  /* 横屏导航坞是全高侧栏、不与内容重叠，毛玻璃没有视觉收益，
+     直接改成实色卡片，省掉整块背景模糊（低端机滚动明显更顺） */
+  body.is-mobile .mp-frosted {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: var(--mp-bg-elevated);
   }
 
   /* 沉浸式页面（无左侧导航栏）左右都需避让挖孔 */
@@ -838,6 +853,11 @@ body.is-mobile .mp-count {
     grid-column: 1 / -1;
   }
 
+  /* 虚拟滚动的上下占位块必须横跨整行，否则双列网格会把它挤进某一列 */
+  body.is-mobile .mp-list > .v-spacer {
+    grid-column: 1 / -1;
+  }
+
   /* 图片网格 3 列 → 5 列 */
   body.is-mobile .mp-grid {
     grid-template-columns: repeat(5, 1fr);
@@ -906,6 +926,14 @@ body.is-mobile .mp-count {
   /* 右栏列表宽度有限，恢复单列（置于全局双列规则之后，同优先级后定义生效） */
   body.is-mobile .mp-page.detail-page .mp-list {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* 歌单详情切换为 Cover Flow 时不再使用左右双栏，封面流占满整页 */
+  body.is-mobile .mp-page.detail-page.cf-mode {
+    display: flex;
+    grid-template-columns: none;
+    grid-template-rows: none;
+    grid-template-areas: none;
   }
 }
 

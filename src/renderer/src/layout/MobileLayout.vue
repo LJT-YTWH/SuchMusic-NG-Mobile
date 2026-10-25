@@ -4,7 +4,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { App } from '@capacitor/app'
 import { Capacitor } from '@capacitor/core'
 import PlayerBar from '../components/layout/PlayerBar.vue'
-import MobilePlayerBar from '../components/layout/MobilePlayerBar.vue'
+import PlayerDock from '../mobile/components/PlayerDock.vue'
+import LandscapeDock from '../mobile/components/LandscapeDock.vue'
+import { useLandscape } from '../mobile/composables/useLandscape'
 import { usePlayerStore } from '../stores/playerStore'
 import '../mobile/theme.css'
 
@@ -12,15 +14,17 @@ const route = useRoute()
 const router = useRouter()
 const player = usePlayerStore()
 
+const onOpenSettings = (e: Event): void => {
+  const section = (e as CustomEvent<{ section?: string }>).detail?.section
+  // 设置页是路由页，层级低于播放页覆盖层：跳转前先收起播放页，避免遮挡
+  if (player.isPlayerPageShown) player.setPlayerPageShown(false)
+  router.push(section ? `/settings/${section}` : '/settings')
+}
+
 onMounted(() => {
   document.body.classList.add('is-mobile')
   // 接管 open-settings 事件：移动端一律路由到自研设置页（不再弹出桌面设置弹窗）
-  window.addEventListener('open-settings', ((e: CustomEvent) => {
-    const section = e?.detail?.section
-    // 设置页是路由页，层级低于播放页覆盖层：跳转前先收起播放页，避免遮挡
-    if (player.isPlayerPageShown) player.setPlayerPageShown(false)
-    router.push(section ? `/settings/${section}` : '/settings')
-  }) as EventListener)
+  window.addEventListener('open-settings', onOpenSettings)
 
   // 安卓返回键 / 侧边返回手势：播放页优先收起，其次路由后退，首页则最小化保持后台播放
   if (Capacitor.isNativePlatform()) {
@@ -38,31 +42,14 @@ onMounted(() => {
   }
 })
 
-// 5 个主导航按钮
-const tabs = [
-  { key: 'home', label: '首页', icon: 'mgc_home_3_line', path: '/' },
-  { key: 'playlist-square', label: '广场', icon: 'mgc_compass_line', path: '/playlist-square' },
-  { key: 'search', label: '搜索', icon: 'mgc_search_line', path: '/search' },
-  { key: 'local', label: '本地', icon: 'mgc_folder_2_line', path: '/local' },
-  { key: 'playlist', label: '我的', icon: 'mgc_music_2_line', path: '/playlist' }
-]
-
-const activeKey = computed(() => {
-  if (
-    route.name === 'playlist-detail' ||
-    route.name === 'recent' ||
-    route.name === 'settings' ||
-    route.name === 'settings-section'
-  ) {
-    return 'playlist'
-  }
-  return (route.name as string) || 'home'
-})
-
 // 沉浸式页面（歌单详情、设置子页）隐藏底栏，内容全屏
 // 本地歌单详情与在线歌单详情保持一致的全屏排版（否则会多叠一层状态栏安全区）
 const immersiveRoutes = ['online-playlist', 'playlist-detail', 'settings-section']
 const isImmersive = computed(() => immersiveRoutes.includes(route.name as string))
+
+// 竖屏用「毛玻璃胶囊 + 中央封面」的底栏；
+// 横屏用同款图标胶囊侧栏 + 独立圆形封面（点击从右侧滑出音乐控制条）
+const { isLandscape } = useLandscape()
 </script>
 
 <template>
@@ -78,24 +65,11 @@ const isImmersive = computed(() => immersiveRoutes.includes(route.name as string
     <!-- 桌面 PlayerBar 在移动端仅提供播放逻辑与播放页，不渲染 UI -->
     <PlayerBar />
 
-    <!-- 悬浮式底栏：迷你播放条 + 椭圆导航胶囊 -->
-    <div v-if="!isImmersive" class="mp-dock">
-      <div class="mp-minibar mp-frosted">
-        <MobilePlayerBar />
-      </div>
-      <nav class="mp-tabpill mp-frosted">
-        <div
-          v-for="t in tabs"
-          :key="t.key"
-          class="tab"
-          :class="{ active: activeKey === t.key }"
-          @click="router.push(t.path)"
-        >
-          <i :class="t.icon"></i>
-          <span>{{ t.label }}</span>
-        </div>
-      </nav>
-    </div>
+    <!-- 竖屏：毛玻璃胶囊底栏（中央封面可展开音乐控制面板） -->
+    <PlayerDock v-if="!isImmersive && !isLandscape" />
+
+    <!-- 横屏：左侧图标胶囊导航坞 + 独立圆形封面（点击自左向右展开音乐控制胶囊） -->
+    <LandscapeDock v-if="!isImmersive && isLandscape" />
   </div>
 </template>
 
@@ -125,10 +99,10 @@ const isImmersive = computed(() => immersiveRoutes.includes(route.name as string
   padding-top: 0;
 }
 
-/* 页面切换动画 */
+/* 页面切换动画（缩短时长：out-in 模式下每次跳转要串行等待两段） */
 .page-fade-enter-active,
 .page-fade-leave-active {
-  transition: opacity 0.22s ease;
+  transition: opacity 0.16s ease;
 }
 
 .page-fade-enter-from,

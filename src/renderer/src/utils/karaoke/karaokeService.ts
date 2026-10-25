@@ -184,6 +184,18 @@ function applyKaraoke(songId: string | number | null, content: string): void {
   player.setLyrics(content)
 }
 
+/**
+ * 外部更新了当前歌词内容（如注入/清空 AI 译文）后同步缓存，
+ * 避免异步歌词回写把旧内容又套回来。
+ */
+export function syncAppliedKaraokeContent(
+  songId: string | number | null,
+  content: string
+): void {
+  if (appliedFor === null || appliedFor !== songId) return
+  appliedContent = content
+}
+
 /** 解析当前可用的逐行歌词：优先内存中非逐字歌词，其次旁挂 .lrc 文件 */
 async function resolveLineLyrics(song: {
   filePath?: string
@@ -302,13 +314,64 @@ export async function generateForCurrentSong(algo: KaraokeAlgo): Promise<boolean
   return true
 }
 
+/**
+ * 用指定的逐行歌词（如包含 AI 翻译的合并歌词）重新生成逐字歌词。
+ * 用于 AI 翻译完成后用户选择「重新生成逐字歌词」的场景。
+ */
+export async function regenerateKaraokeWithLyrics(
+  song: { filePath?: string; title?: string; artist?: string },
+  lyrics: string,
+  algo?: KaraokeAlgo
+): Promise<boolean> {
+  const player = usePlayerStore()
+  const settings = useSettingsStore()
+  karaokeState.prompt = null
+  if (!song.filePath) {
+    notify('info', '当前不是本地歌曲，无法生成逐字歌词')
+    return false
+  }
+  if (karaokeState.generating) {
+    notify('info', '正在生成中，请稍候')
+    return false
+  }
+  if (!lyrics.trim()) {
+    notify('info', '没有可用于生成逐字歌词的歌词')
+    return false
+  }
+  const useAlgo = algo || settings.karaoke.lastAlgo
+  settings.karaoke.lastAlgo = useAlgo
+  const token = ++genToken
+  const wasPlaying = player.isPlaying
+  const ok = await generateAndSave(
+    song.filePath,
+    song.title || '',
+    song.artist || '',
+    useAlgo,
+    true,
+    token,
+    lyrics
+  )
+  if (!ok) return false
+  if (player.currentSong?.filePath !== song.filePath) return true
+  if (settings.karaoke.afterGenPlay === 'restart') {
+    webAudioEngine.seek(0)
+    player.setPosition(0)
+  }
+  if (wasPlaying && !player.isPlaying) {
+    const played = await webAudioEngine.play()
+    if (played) player.setPlaying(true)
+  }
+  return true
+}
+
 async function generateAndSave(
   filePath: string,
   title: string,
   artist: string,
   algo: KaraokeAlgo,
   blocking: boolean,
-  token: number
+  token: number,
+  lyricsOverride?: string
 ): Promise<boolean> {
   const player = usePlayerStore()
   karaokeState.generating = true
@@ -321,7 +384,11 @@ async function generateAndSave(
   try {
     const pcm = await decodeToMono(filePath)
     if (token !== genToken) return false
-    const lrc = await resolveLineLyrics(player.currentSong?.filePath === filePath ? player.currentSong : { filePath })
+    const lrc =
+      lyricsOverride ||
+      (await resolveLineLyrics(
+        player.currentSong?.filePath === filePath ? player.currentSong : { filePath }
+      ))
     if (!lrc) {
       notify('info', '未找到可用的逐行歌词')
       return false

@@ -1,14 +1,36 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { NSpin } from 'naive-ui'
 import { fetchToplists, type ToplistItem } from '../../apis/netease/playlist/toplist'
 import MobileCover from '../components/MobileCover.vue'
+import MobileCoverFlow, { type CoverFlowItem } from '../components/MobileCoverFlow.vue'
+import LayoutModeToggle from '../components/LayoutModeToggle.vue'
+import { useLibraryLayout } from '../composables/useLibraryLayout'
 
 const router = useRouter()
 const loading = ref(true)
 const official = ref<ToplistItem[]>([])
 const others = ref<ToplistItem[]>([])
+
+// 横屏 Cover Flow 模式
+const { useCoverFlowNow } = useLibraryLayout()
+
+const flowItems = computed<CoverFlowItem[]>(() =>
+  [...official.value, ...others.value].map((item) => ({
+    id: item.id,
+    title: item.name,
+    subtitle: item.updateFrequency || '每日更新',
+    cover: item.coverImgUrl,
+    badge: item.updateFrequency || ''
+  }))
+)
+
+const flowActive = computed(() => useCoverFlowNow.value && !loading.value && flowItems.value.length > 0)
+
+const onFlowSelect = (item: CoverFlowItem): void => {
+  open(Number(item.id))
+}
 
 onMounted(async () => {
   try {
@@ -26,15 +48,28 @@ const open = (id: number): void => {
 </script>
 
 <template>
-  <div class="mp-page">
+  <div class="mp-page" :class="{ 'cf-mode': flowActive }">
     <div class="mp-header mp-rise">
       <div>
         <div class="mp-title">排行榜</div>
         <div class="mp-sub">官方榜单一手掌握</div>
       </div>
+      <div class="header-side">
+        <LayoutModeToggle />
+      </div>
     </div>
 
-    <div v-if="loading" class="mp-loading"><n-spin size="medium" /></div>
+    <!-- 横屏 Cover Flow：3D 封面流浏览榜单 -->
+    <MobileCoverFlow
+      v-if="flowActive"
+      :items="flowItems"
+      label="排行榜"
+      eyebrow="TOP LIST"
+      :start-index="2"
+      @select="onFlowSelect"
+    />
+
+    <div v-else-if="loading" class="mp-loading"><n-spin size="medium" /></div>
 
     <div v-else class="mp-scroll">
       <!-- 官方榜：大圆角分组卡片 -->
@@ -76,6 +111,8 @@ const open = (id: number): void => {
 </template>
 
 <style scoped>
+/* Cover Flow 使用透明背景，直接沿用页面主题色（不再铺深色舞台） */
+
 .official-list {
   display: flex;
   flex-direction: column;

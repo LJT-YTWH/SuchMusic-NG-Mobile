@@ -13,6 +13,8 @@ export interface GeneralSettings {
   autoCheckUpdate: boolean
   updateChannel: 'stable' | 'beta'
   searchResultOrder: string[]
+  /** 长列表虚拟滚动（默认开启；关闭用于排查显示异常） */
+  virtualScroll: boolean
 }
 
 export interface AppearanceSettings {
@@ -89,6 +91,8 @@ export interface AdvancedFxSettings {
   crossfadeEnabled: boolean
   /** 淡入淡出时长（秒）1 - 12 */
   crossfadeSeconds: number
+  /** 淡化曲线：equalPower=等功率（默认，响度平滑）/ linear=线性 */
+  crossfadeCurve: 'equalPower' | 'linear'
   /** 人声消除（卡拉 OK） */
   vocalRemovalEnabled: boolean
   /** 用户已确认「开启高级音效后在线音乐需先下载再播放」的提示 */
@@ -107,6 +111,7 @@ export const DEFAULT_ADVANCED_FX: AdvancedFxSettings = {
   stereoWidth: 1.5,
   crossfadeEnabled: false,
   crossfadeSeconds: 6,
+  crossfadeCurve: 'equalPower',
   vocalRemovalEnabled: false,
   confirmed: false
 }
@@ -177,7 +182,8 @@ export const useSettingsStore = defineStore('settings', () => {
     orpheusProtocol: true,
     autoCheckUpdate: true,
     updateChannel: 'stable',
-    searchResultOrder: ['tx', 'kg', 'wy', 'kw', 'bilibili', 'mg']
+    searchResultOrder: ['tx', 'kg', 'wy', 'kw', 'bilibili', 'mg'],
+    virtualScroll: true
   })
 
   const appearance = ref<AppearanceSettings>({
@@ -372,9 +378,17 @@ export const useSettingsStore = defineStore('settings', () => {
 
   // 交叉淡入淡出
   watch(
-    () => [advancedFx.value.crossfadeEnabled, advancedFx.value.crossfadeSeconds],
+    () => [
+      advancedFx.value.crossfadeEnabled,
+      advancedFx.value.crossfadeSeconds,
+      advancedFx.value.crossfadeCurve
+    ],
     () => {
-      webAudioEngine.setCrossfade(advancedFx.value.crossfadeEnabled, advancedFx.value.crossfadeSeconds)
+      webAudioEngine.setCrossfade(
+        advancedFx.value.crossfadeEnabled,
+        advancedFx.value.crossfadeSeconds,
+        advancedFx.value.crossfadeCurve
+      )
     },
     { immediate: true }
   )

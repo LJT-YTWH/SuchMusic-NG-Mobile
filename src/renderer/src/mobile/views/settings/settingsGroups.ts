@@ -45,7 +45,7 @@ export const settingsGroups: SettingsGroup[] = [
       {
         key: 'preference',
         label: '偏好',
-        sub: '打开软件时的屏幕方向',
+        sub: '偏好类设置',
         icon: 'mgc_settings_4_line',
         gradient: 'linear-gradient(135deg, #ffd60a 0%, #ff9f0a 100%)'
       }

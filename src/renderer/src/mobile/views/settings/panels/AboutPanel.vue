@@ -10,7 +10,7 @@
       </div>
       <div class="about-name">SuchMusic</div>
       <div class="about-slogan">让音乐更纯粹</div>
-      <div class="about-ver-pill">V1.3.1-安卓-社区版</div>
+      <div class="about-ver-pill">V1.5.2-安卓-社区版</div>
     </div>
 
     <div class="mp-list setting-list">

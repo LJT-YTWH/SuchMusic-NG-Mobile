@@ -12,6 +12,8 @@ import type { PlayerSong } from '../../stores/playerStore'
 import { usePlayerStore } from '../../stores/playerStore'
 import MobileSongRow from '../components/MobileSongRow.vue'
 import MobileCover from '../components/MobileCover.vue'
+import MobileCoverFlow, { type CoverFlowItem } from '../components/MobileCoverFlow.vue'
+import { useLibraryLayout } from '../composables/useLibraryLayout'
 import defaultCover from '@renderer/assets/icon.png'
 
 const route = useRoute()
@@ -45,10 +47,57 @@ const playAt = (song: PlayerSong): void => {
   const idx = songs.value.findIndex((s) => s.id === song.id)
   playSongs(songs.value, idx, 'search')
 }
+
+// ==================== 横屏 Cover Flow ====================
+// 与本地歌单详情一致：用户在设置里选择 Cover Flow 后，横屏进入歌单以封面流展示歌曲
+
+const { useCoverFlowNow } = useLibraryLayout()
+
+const flowItems = computed<CoverFlowItem[]>(() =>
+  songs.value.map((s, i) => ({
+    id: `${String(s.id)}#${i}`,
+    title: s.title,
+    subtitle: s.artist,
+    cover: s.cover || detail.value?.coverImgUrl || '',
+    badge: s.album || `${i + 1} / ${songs.value.length}`
+  }))
+)
+
+const flowActive = computed(
+  () => useCoverFlowNow.value && !loading.value && flowItems.value.length > 0
+)
+
+const flowStartIndex = computed(() => {
+  const idx = songs.value.findIndex((s) => String(s.id) === String(player.currentSong?.id))
+  return idx < 0 ? 0 : idx
+})
+
+function onFlowSelect(_item: CoverFlowItem, index: number): void {
+  const song = songs.value[index]
+  if (song) playAt(song)
+}
 </script>
 
 <template>
-  <div class="mp-page detail-page">
+  <div class="mp-page detail-page" :class="{ 'cf-mode': flowActive }">
+    <!-- 横屏 + Cover Flow：整页 3D 封面流展示歌单内的歌曲 -->
+    <MobileCoverFlow
+      v-if="flowActive"
+      :items="flowItems"
+      :label="detail?.name || '歌单'"
+      :eyebrow="`${songs.length} 首 · 在线歌单`"
+      :start-index="flowStartIndex"
+      show-brand
+      @select="onFlowSelect"
+    >
+      <template #lead>
+        <button class="cf-back" type="button" aria-label="返回" @click="router.back()">
+          <i class="mgc_arrow_left_line"></i>
+        </button>
+      </template>
+    </MobileCoverFlow>
+
+    <template v-else>
     <!-- 头部：封面全幅拉伸 + 毛玻璃模糊 -->
     <div class="header">
       <img :src="detail?.coverImgUrl || defaultCover" class="header-bg" alt="" />
@@ -94,6 +143,7 @@ const playAt = (song: PlayerSong): void => {
       </div>
       <div class="bottom-pad"></div>
     </div>
+    </template>
   </div>
 </template>
 
@@ -234,5 +284,26 @@ const playAt = (song: PlayerSong): void => {
 .bottom-pad {
   height: calc(20px + var(--sab, 0px));
   flex-shrink: 0;
+}
+
+/* Cover Flow 模式下左上角的返回按钮 */
+.cf-back {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  margin-right: 2px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--mp-fill);
+  color: var(--mp-text);
+  font-size: 18px;
+  transition: transform 0.15s cubic-bezier(0.32, 0.72, 0.35, 1);
+}
+
+.cf-back:active {
+  transform: scale(0.9);
 }
 </style>

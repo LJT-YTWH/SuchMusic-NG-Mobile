@@ -639,6 +639,8 @@ const togglePlay = async () => {
     updateMediaPositionState()
   } else {
     if (player.currentSong) {
+      // 播放失败后的重载会重置进度，先记住暂停位置，重载后跳回
+      const resumePos = player.positionMs
       const success = await webAudioEngine.play()
       if (success) {
         player.setPlaying(true)
@@ -649,6 +651,10 @@ const togglePlay = async () => {
         // 播放失败（如未加载），尝试重新加载并播放
         console.log('[PlayerBar] Play failed, reloading song...')
         await loadAndPlaySong(player.currentSong, true)
+        // 修复：重载流程会把 positionMs 归零，这里恢复暂停前的位置
+        if (resumePos > 1000 && player.currentSong) {
+          webAudioEngine.seek(resumePos)
+        }
       }
     }
   }

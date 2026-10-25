@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import type { PlayerSong } from '../../stores/playerStore'
 import { formatDuration } from '../helpers'
+import { rememberMorphOrigin } from '../composables/useMorphOrigin'
 import MobileCover from './MobileCover.vue'
 
-defineProps<{
+const props = defineProps<{
   song: PlayerSong
   index?: number
   playing?: boolean
@@ -17,10 +18,20 @@ const emit = defineEmits<{
   (e: 'click', song: PlayerSong): void
   (e: 'action', song: PlayerSong): void
 }>()
+
+/**
+ * 「从哪来回哪去」：点击歌曲行时显式把该行记为播放页的展开原点，
+ * 播放页从这一行放大展开、收起时也回到这一行，
+ * 不会再因为上一次记录的底栏控制面板位置而「从底部音乐控制区放大」。
+ */
+function onClick(event: MouseEvent): void {
+  rememberMorphOrigin(event.currentTarget as HTMLElement | null)
+  emit('click', props.song)
+}
 </script>
 
 <template>
-  <div class="song-row" :class="{ playing }" @click="emit('click', song)">
+  <div class="song-row" data-morph-origin :class="{ playing }" @click="onClick">
     <div v-if="showIndex" class="row-index" :class="{ 'is-playing': playing }">
       <i v-if="playing" class="mgc_volume_line"></i>
       <span v-else>{{ (index ?? 0) + 1 }}</span>

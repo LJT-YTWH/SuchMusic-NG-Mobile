@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, h, onMounted, onBeforeUnmount } from 'vue'
+import { computed, ref, h, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { NEmpty, NSpin, useMessage, useDialog } from 'naive-ui'
 import { usePlaylistStore } from '../../stores/playlistStore'
@@ -14,6 +14,9 @@ import {
   type NeteaseProfile
 } from '../../apis/netease/login/qrcode'
 import MobileCover from '../components/MobileCover.vue'
+import MobileCoverFlow, { type CoverFlowItem } from '../components/MobileCoverFlow.vue'
+import LayoutModeToggle from '../components/LayoutModeToggle.vue'
+import { useLibraryLayout } from '../composables/useLibraryLayout'
 
 const router = useRouter()
 const playlistStore = usePlaylistStore()
@@ -203,16 +206,37 @@ function remove(id: string, name: string): void {
 const coverOf = (pl: { cover?: string; tracks: { cover?: string }[] }): string => {
   return pl.cover || pl.tracks[0]?.cover || ''
 }
+
+// ==================== 横屏 Cover Flow ====================
+
+const { useCoverFlowNow } = useLibraryLayout()
+
+const flowItems = computed<CoverFlowItem[]>(() =>
+  playlistStore.playlists.map((pl) => ({
+    id: pl.id,
+    title: pl.name,
+    subtitle: `${pl.tracks.length} 首 · 我的歌单`,
+    cover: coverOf(pl),
+    badge: `${pl.tracks.length} TRACKS`
+  }))
+)
+
+const flowActive = computed(() => useCoverFlowNow.value && flowItems.value.length > 0)
+
+const onFlowSelect = (item: CoverFlowItem): void => {
+  router.push(`/playlist/${item.id}`)
+}
 </script>
 
 <template>
-  <div class="mp-page">
+  <div class="mp-page" :class="{ 'cf-mode': flowActive }">
     <div class="mp-header mp-rise">
       <div>
         <div class="mp-title">我的</div>
         <div class="mp-sub">收藏与自建歌单</div>
       </div>
       <div class="header-side">
+        <LayoutModeToggle />
         <button class="mp-btn-icon" aria-label="网易云登录" @click="openLogin">
           <i class="mgc_qrcode_line"></i>
         </button>
@@ -225,7 +249,16 @@ const coverOf = (pl: { cover?: string; tracks: { cover?: string }[] }): string =
       </div>
     </div>
 
-    <div class="mp-scroll">
+    <!-- 横屏 Cover Flow：3D 封面流逛我的歌单 -->
+    <MobileCoverFlow
+      v-if="flowActive"
+      :items="flowItems"
+      label="我的歌单"
+      eyebrow="MY PLAYLISTS"
+      @select="onFlowSelect"
+    />
+
+    <div v-else class="mp-scroll">
       <!-- 用户卡片 -->
       <div class="user-card mp-rise mp-press" style="--mp-rise-delay: 0.05s" @click="onUserCardClick">
         <div class="user-avatar">
@@ -320,6 +353,8 @@ const coverOf = (pl: { cover?: string; tracks: { cover?: string }[] }): string =
 </template>
 
 <style scoped>
+/* Cover Flow 使用透明背景，直接沿用页面主题色（不再铺深色舞台） */
+
 /* ==================== 用户卡片 ==================== */
 .user-card {
   display: flex;

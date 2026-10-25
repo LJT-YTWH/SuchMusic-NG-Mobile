@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, computed } from 'vue'
 import { NEmpty } from 'naive-ui'
 import { usePlayerStore, recordKind, type PlayerSong, type PlayRecord } from '../../stores/playerStore'
 import MobileSongRow from '../components/MobileSongRow.vue'
+import MobileCoverFlow, { type CoverFlowItem } from '../components/MobileCoverFlow.vue'
+import LayoutModeToggle from '../components/LayoutModeToggle.vue'
+import { useLibraryLayout } from '../composables/useLibraryLayout'
 
 const player = usePlayerStore()
 
@@ -83,16 +86,42 @@ const playAll = (): void => {
   player.playSongAtIndex(0)
   player.setPlayerPageShown(true)
 }
+
+// ==================== 横屏 Cover Flow ====================
+// 与本地音乐/歌单广场一致：横屏且用户选择 Cover Flow 时，最近播放也以封面流浏览
+const { useCoverFlowNow } = useLibraryLayout()
+
+const flowItems = computed<CoverFlowItem[]>(() =>
+  songs.value.map((song, i) => ({
+    id: `${String(song.id)}#${i}`,
+    title: song.title,
+    subtitle: `${song.artist}${song.album ? ' · ' + song.album : ''}`,
+    cover: song.cover,
+    badge: kinds.value[i] === 'local' ? '本地' : '在线'
+  }))
+)
+
+const flowActive = computed(() => useCoverFlowNow.value && flowItems.value.length > 0)
+
+const flowStartIndex = computed(() => {
+  const idx = songs.value.findIndex((s) => String(s.id) === String(player.currentSong?.id))
+  return idx < 0 ? 0 : idx
+})
+
+function onFlowSelect(_item: CoverFlowItem, index: number): void {
+  playAt(index)
+}
 </script>
 
 <template>
-  <div class="mp-page">
+  <div class="mp-page" :class="{ 'cf-mode': flowActive }">
     <div class="mp-header mp-rise">
       <div>
         <div class="mp-title">最近播放</div>
         <div class="mp-sub">{{ songs.length }} 首</div>
       </div>
       <div class="header-side">
+        <LayoutModeToggle />
         <button v-if="songs.length" class="mp-btn-primary play-all" @click="playAll">
           <i class="mgc_play_fill"></i>
           <span>播放全部</span>
@@ -100,7 +129,16 @@ const playAll = (): void => {
       </div>
     </div>
 
-    <div class="mp-scroll">
+    <!-- 横屏 Cover Flow：最近播放的歌曲以 3D 封面流展示 -->
+    <MobileCoverFlow
+      v-if="flowActive"
+      :items="flowItems"
+      eyebrow="RECENTLY PLAYED"
+      :start-index="flowStartIndex"
+      @select="onFlowSelect"
+    />
+
+    <div v-else class="mp-scroll">
       <div class="mp-list mp-rise" style="--mp-rise-delay: 0.05s" v-if="songs.length">
         <MobileSongRow
           v-for="(song, i) in songs"

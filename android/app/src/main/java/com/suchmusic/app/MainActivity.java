@@ -14,6 +14,7 @@ import androidx.core.view.WindowInsetsControllerCompat;
 
 import com.getcapacitor.BridgeActivity;
 import com.suchmusic.app.plugins.AppPrefsPlugin;
+import com.suchmusic.app.plugins.FileExportPlugin;
 import com.suchmusic.app.plugins.FloatingLyricPlugin;
 import com.suchmusic.app.plugins.MediaSessionPlugin;
 import com.suchmusic.app.plugins.SuchLocalMusicPlugin;
@@ -27,6 +28,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(MediaSessionPlugin.class);
         registerPlugin(FloatingLyricPlugin.class);
         registerPlugin(AppPrefsPlugin.class);
+        registerPlugin(FileExportPlugin.class);
         super.onCreate(savedInstanceState);
         // 沉浸式：WebView 内容延伸到状态栏与导航栏区域，系统栏全透明
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
