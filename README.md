@@ -11,6 +11,7 @@
 [![Platform](https://img.shields.io/badge/Platform-Android-green.svg)]()
 [![Vue 3](https://img.shields.io/badge/Vue-3.x-4FC68D.svg)]()
 [![Capacitor](https://img.shields.io/badge/Capacitor-8.x-119EFF.svg)]()
+[![Android TV](https://img.shields.io/badge/Android%20TV-Remote%20Ready-3DDC84.svg)]()
 
 **简体中文** ｜ [English](#english)
 
@@ -39,8 +40,14 @@
 
 - 📱 **移动端界面**：竖屏 / 横屏双布局、全屏播放页（上下滑动开关）、手势切页
   - 竖屏：5 槽位毛玻璃胶囊底栏（首页 / 广场 / 中央圆形封面 / 本地 / 我的），点封面横向弹簧展开音乐控制面板
-  - 横屏：左侧图标胶囊导航（首页 / 广场 / 搜索 / 最近播放 / 本地 / 我的）+ 独立圆形封面，点击后自左向右展开音乐控制胶囊
+  - 横屏：左侧图标胶囊导航（首页 / 广场 / 搜索 / 最近播放 / 本地 / 我的）+ 独立圆形封面，点击后自左向右展开音乐控制胶囊；
+    **超大屏（≥ 1024px，平板 / 电视）时整组导航固定在屏幕纵向中间**
   - 支持浅色 / 深色主题，弹层统一为「从按钮长成卡片」的动画
+- 📺 **安卓电视 / 电视盒子**：识别电视环境后自动切换为电视档界面（更大的按钮、封面与控制胶囊）；
+  遥控器方向键空间导航、OK 确认、返回键逐级退出，播放 / 上一首 / 下一首媒体键直接控制播放器；
+  无触摸屏设备可安装，并提供 Android TV 桌面入口与电视横幅
+- 🎨 **播放页界面设置**：歌词字号（12~72px）/ 行距 / 透明度 / 颜色 / 加粗 / 模糊 / 翻译开关，
+  并可单独调节播放页歌名字号（12~56px）与歌手字号（10~40px）
 - 🎤 **逐字歌词生成**：基于音频强制对齐（V3 / V4 两套算法，纯 DSP + 动态规划），
   将逐行 LRC 转换为逐字卡拉 OK 歌词，支持翻译行与词间空格保留
 - 🎛 **逐字歌词管理**：开关、自动生成、生成时机、生成完后播放位置、
@@ -60,15 +67,24 @@
 
 前往 [Releases](https://github.com/LJT-YTWH/SuchMusic-NG-Mobile/releases) 下载最新 APK：
 
-- 最新：`SuchMusic-1.5.2-android.apk`（versionName 1.5.2 / versionCode 8）
-- 系统要求：Android 7.0（API 24）及以上
+- 最新：`SuchMusic-1.5.3-android.apk`（versionName 1.5.3 / versionCode 9）
+- 系统要求：Android 7.0（API 24）及以上；支持 Android TV / Google TV / 电视盒子（遥控器操作）
 - 使用同一个社区版签名，可直接覆盖安装旧版本；签名不一致时会安装失败
+
+### 安卓电视怎么用
+
+1. 装好后可直接从电视桌面的 SuchMusic 横幅启动（已注册 Android TV 入口）；
+2. **方向键**在控件之间移动焦点（主题色描边 + 光晕即当前焦点），**OK / 确认** 点击，**返回键** 逐级退出
+   （先收起音乐控制胶囊 / 面板，再返回上一页）；
+3. 遥控器上的 **播放 / 暂停、上一首、下一首** 多媒体键可直接控制播放，无需进入播放页；
+4. 电视上界面会自动放大（更大的导航按钮、圆形封面与控制胶囊），字号与排版在「设置 → 播放页界面设置」里调整。
 
 ### 版本历史
 
 | 版本 | 说明 |
 | --- | --- |
-| **v1.5.2** | 1.5 系列完整更新：底栏胶囊 UI、横屏 Cover Flow、AI 歌词翻译、歌曲下载、浅色模式适配、横屏界面重做（1.5.0 / 1.5.1 的改动一并包含；1.4.0 未单独发布，内容也已并入本版本） |
+| **v1.5.3** | 超大屏横屏下左侧导航坞纵向居中；**安卓电视遥控器适配**（方向键空间导航、OK / 返回、媒体键、电视档界面、TV 桌面入口与横幅）；「播放页歌词展示」升级为「播放页界面设置」，新增歌名 / 歌手字号，歌词字号上限 32 → 72px |
+| v1.5.2 | 1.5 系列前三版合并发布：底栏胶囊 UI、横屏 Cover Flow、AI 歌词翻译、歌曲下载、浅色模式适配、横屏界面重做（1.5.0 / 1.5.1 的改动一并包含；1.4.0 未单独发布，内容也已并入本版本） |
 | v1.3.1 | 本地歌单增强、横屏抽屉修复、逐字歌词生成时机修复、通知栏封面 |
 | v1.3 | 首个安卓社区版：移动端移植 + 逐字歌词 |
 
@@ -80,6 +96,7 @@
 | 移动端容器 | Capacitor 8（Android） |
 | 音频 | Web Audio API（解码 / 处理 / 播放） |
 | 歌词 | AMLL 歌词组件 + 自研逐字对齐算法 |
+| 电视适配 | Android Leanback + 自研 WebView 空间导航（方向键 / 焦点框 / 媒体键） |
 | 桌面端 | Electron（保留原项目桌面端代码） |
 
 ## 📦 构建（Android）
@@ -94,7 +111,8 @@ npm install
 NODE_OPTIONS="--max-old-space-size=1280 --max-semi-space-size=32" \
   node node_modules/vite/bin/vite.js build --config vite.config.mobile.ts --minify false
 
-# 3. 同步到 Android 工程（无插件变更时用 cap copy 更快）
+# 3. 同步到 Android 工程（无插件变更时用 cap copy 更快；
+#    若 android/capacitor-cordova-android-plugins 目录不存在，必须改用 npx cap sync android）
 npx cap copy android
 
 # 4. 打包（release 已通过 keystore.properties 配置签名时可覆盖安装）
@@ -134,6 +152,7 @@ keyPassword=你的密码
 ├── src/renderer/src/mobile/
 │   ├── components/                 # 底栏、侧栏、Cover Flow、跑马灯、卡片弹层等组件
 │   ├── composables/                # 横屏判定、浏览方式、虚拟滚动、弹层原点等组合式函数
+│   ├── tv/                         # 安卓电视遥控器支持（空间导航 / 媒体键 / 焦点样式）
 │   ├── views/                      # 首页 / 广场 / 本地 / 我的 / 播放页 / 设置页
 │   └── theme.css                   # 移动端主题令牌（深色 / 浅色）
 ├── src/renderer/src/platform/      # 平台桥接（移动端 IPC / 文件 / 原生能力）
@@ -198,8 +217,16 @@ it adds:
     the cover expands the music control panel sideways with a spring animation
   - Landscape: icon-only capsule navigation on the left (Home / Square / Search / Recently
     played / Local / Mine) plus a standalone circular cover that expands a control capsule
-    left-to-right when tapped
+    left-to-right when tapped; **on large screens (≥ 1024px — tablets & TVs) the whole group
+    stays vertically centered**
   - Light & dark themes; every sheet morphs out of the button that triggered it
+- 📺 **Android TV / TV boxes** — automatically switches to a TV-sized UI (bigger buttons, cover
+  and control capsule) when a TV is detected; D-pad spatial navigation, OK to confirm, Back to
+  exit a level, and media keys (play/pause, previous, next) control the player directly.
+  Installable on devices without a touchscreen, with a Leanback launcher entry and banner
+- 🎨 **Player page appearance** — lyric font size (12–72 px), line height, dim opacity, colors,
+  bold, blur and translation toggle, plus separate song-title (12–56 px) and artist (10–40 px)
+  font sizes
 - 🎤 **Word-by-word lyric generation** — forced alignment on the audio track (V3 / V4 algorithms,
   pure DSP + dynamic programming) that converts line-level LRC into karaoke-style word-level
   lyrics, preserving translation lines and inter-word spaces
@@ -226,16 +253,30 @@ it adds:
 
 Get the latest APK from [Releases](https://github.com/LJT-YTWH/SuchMusic-NG-Mobile/releases):
 
-- Latest: `SuchMusic-1.5.2-android.apk` (versionName 1.5.2 / versionCode 8)
-- Requires Android 7.0 (API 24) or above
+- Latest: `SuchMusic-1.5.3-android.apk` (versionName 1.5.3 / versionCode 9)
+- Requires Android 7.0 (API 24) or above; Android TV / Google TV / TV boxes are supported
+  (remote-control driven)
 - Signed with the same community key, so it installs over older versions directly; a different
   signing key will be rejected
+
+### Using it on Android TV
+
+1. Launch it straight from the SuchMusic banner on the TV home screen (a Leanback entry is
+   registered);
+2. Move the focus with the **D-pad** (the accent-colored outline plus glow marks the current
+   focus), press **OK** to activate and **Back** to exit a level (the control capsule or sheet
+   closes first, then the page goes back);
+3. The **play/pause, previous and next** media keys on the remote control playback directly —
+   no need to open the player page;
+4. The UI scales up automatically on TVs (larger nav buttons, circular cover and control
+   capsule); font sizes and layout live in *Settings → Player page appearance*.
 
 ### Version history
 
 | Version | Summary |
 | --- | --- |
-| **v1.5.2** | Full 1.5.x line: dock capsule UI, landscape Cover Flow, AI lyric translation, song export, light theme support, landscape UI overhaul (includes 1.5.0 / 1.5.1; 1.4.0 was never released separately — its changes are included too) |
+| **v1.5.3** | Vertically centered landscape dock on large screens; **Android TV remote support** (D-pad spatial navigation, OK / Back, media keys, TV-sized UI, Leanback entry & banner); "Player page lyric display" upgraded to "Player page appearance" with song-title / artist font sizes and lyric font size cap raised from 32 to 72 px |
+| v1.5.2 | First three 1.5.x releases combined: dock capsule UI, landscape Cover Flow, AI lyric translation, song export, light theme support, landscape UI overhaul (includes 1.5.0 / 1.5.1; 1.4.0 was never released separately — its changes are included too) |
 | v1.3.1 | Local playlist improvements, landscape drawer fixes, karaoke generation timing fix, notification cover art |
 | v1.3 | First Android community edition: mobile port + karaoke lyrics |
 
@@ -247,6 +288,7 @@ Get the latest APK from [Releases](https://github.com/LJT-YTWH/SuchMusic-NG-Mobi
 | Mobile runtime | Capacitor 8 (Android) |
 | Audio | Web Audio API (decode / process / playback) |
 | Lyrics | AMLL lyric components + in-house forced-alignment algorithms |
+| TV | Android Leanback + in-house WebView spatial navigation (D-pad / focus ring / media keys) |
 | Desktop | Electron (original desktop code preserved) |
 
 ## 📦 Build (Android)
@@ -261,7 +303,8 @@ npm install
 NODE_OPTIONS="--max-old-space-size=1280 --max-semi-space-size=32" \
   node node_modules/vite/bin/vite.js build --config vite.config.mobile.ts --minify false
 
-# 3. Sync to the Android project (cap copy is faster when no plugin changed)
+# 3. Sync to the Android project (cap copy is faster when no plugin changed;
+#    if android/capacitor-cordova-android-plugins is missing, use `npx cap sync android` instead)
 npx cap copy android
 
 # 4. Build the APK (signing is picked up from keystore.properties)
@@ -305,6 +348,7 @@ Without this file the build produces an **unsigned** release APK (debug use only
 ├── src/renderer/src/mobile/
 │   ├── components/                 # Dock, side nav, Cover Flow, marquee, card sheets
 │   ├── composables/                # Landscape detection, layout mode, virtual rows, morph origin
+│   ├── tv/                         # Android TV remote support (spatial nav / media keys / focus ring)
 │   ├── views/                      # Home / Square / Local / Playlists / Player / Settings
 │   └── theme.css                   # Mobile theme tokens (dark / light)
 ├── src/renderer/src/platform/      # Platform bridge (mobile IPC / files / native)
