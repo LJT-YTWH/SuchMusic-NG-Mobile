@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePlayerStore } from '../../stores/playerStore'
 import { webAudioEngine } from '../../audio/audio-engine'
+import { isTvMode } from '../tv/remoteControl'
 import MarqueeText from './MarqueeText.vue'
 import MobileCover from './MobileCover.vue'
 import DockProgressRing from './DockProgressRing.vue'
@@ -62,8 +63,77 @@ const onKeydown = (event: KeyboardEvent): void => {
   if (event.key === 'Escape' && open.value) closeDrawer()
 }
 
-onMounted(() => document.addEventListener('keydown', onKeydown))
-onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
+// ==================== 胶囊锚点：跟随封面实测位置 ====================
+
+/**
+ * 超大屏（平板 / 电视）横屏下，导航坞整体垂直居中，封面不再固定在屏幕左下角，
+ * 因此胶囊的 left / bottom 不能再写死，改为按封面与导航坞的实测位置计算。
+ */
+const dockEl = ref<HTMLElement | null>(null)
+const coverEl = ref<HTMLButtonElement | null>(null)
+const capsuleEl = ref<HTMLElement | null>(null)
+const capLeft = ref<number | null>(null)
+const capBottom = ref<number | null>(null)
+
+const tv = isTvMode()
+const ringSize = computed(() => (tv ? 86 : 54))
+
+function measureCapsuleAnchor(): void {
+  const dock = dockEl.value
+  const cover = coverEl.value
+  if (!dock || !cover) return
+  const dockRect = dock.getBoundingClientRect()
+  const coverRect = cover.getBoundingClientRect()
+  if (dockRect.width < 1 || coverRect.height < 1) return
+  capLeft.value = Math.round(dockRect.right)
+  // 底边比封面底边再低 3px（沿用 1.5.2 的视觉关系）
+  capBottom.value = Math.max(0, Math.round(window.innerHeight - coverRect.bottom - 3))
+}
+
+const capsuleStyle = computed(() => {
+  const style: Record<string, string> = {}
+  if (capLeft.value !== null) style.left = `${capLeft.value}px`
+  if (capBottom.value !== null) style.bottom = `${capBottom.value}px`
+  return style
+})
+
+// 安卓返回键（遥控器返回）：优先收起胶囊
+const onBack = (event: Event): void => {
+  if (!open.value) return
+  event.preventDefault()
+  closeDrawer()
+}
+
+watch(open, async (isOpen) => {
+  await nextTick()
+  measureCapsuleAnchor()
+  if (!tv) return
+  // 遥控器场景：展开后焦点进入胶囊，收起后回到圆形封面，否则焦点会掉到 body
+  if (isOpen) capsuleEl.value?.focus({ preventScroll: true })
+  else coverEl.value?.focus({ preventScroll: true })
+})
+
+let resizeObserver: ResizeObserver | null = null
+
+onMounted(() => {
+  document.addEventListener('keydown', onKeydown)
+  window.addEventListener('mobile:back', onBack)
+  window.addEventListener('resize', measureCapsuleAnchor)
+  void nextTick(measureCapsuleAnchor)
+  if (typeof ResizeObserver !== 'undefined') {
+    resizeObserver = new ResizeObserver(() => measureCapsuleAnchor())
+    if (dockEl.value) resizeObserver.observe(dockEl.value)
+    if (coverEl.value) resizeObserver.observe(coverEl.value)
+  }
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('mobile:back', onBack)
+  window.removeEventListener('resize', measureCapsuleAnchor)
+  resizeObserver?.disconnect()
+  resizeObserver = null
+})
 
 // ==================== 当前播放 ====================
 
@@ -95,7 +165,7 @@ function openPlayerPage(): void {
 </script>
 
 <template>
-  <div class="lsd">
+  <div ref="dockEl" class="lsd">
     <nav class="lsd-nav" aria-label="主导航">
       <button
         v-for="t in tabs"
@@ -104,6 +174,7 @@ function openPlayerPage(): void {
         :class="{ active: activeKey === t.key }"
         type="button"
         :aria-label="t.label"
+        :data-tv-initial="activeKey === t.key ? 'true' : null"
         @click="router.push(t.path)"
       >
         <i :class="t.icon"></i>
@@ -113,9 +184,15 @@ function openPlayerPage(): void {
     <div class="lsd-spacer"></div>
 
     <!-- 竖屏底栏中央的圆形封面，横屏时单独放在这里 -->
-    <button class="lsd-cover" type="button" aria-label="打开音乐控制" @click="toggleDrawer">
+    <button
+      ref="coverEl"
+      class="lsd-cover"
+      type="button"
+      aria-label="打开音乐控制"
+      @click="toggleDrawer"
+    >
       <MobileCover :src="coverUrl" round class="lsd-cover-art" />
-      <DockProgressRing :size="54" />
+      <DockProgressRing :size="ringSize" />
     </button>
   </div>
 
@@ -125,11 +202,13 @@ function openPlayerPage(): void {
 
     <!-- 扁胶囊：与竖屏版同款，但展开方向为自左向右 -->
     <section
+      ref="capsuleEl"
       class="lsd-capsule"
       :class="{ open }"
       role="button"
       tabindex="0"
       aria-label="打开播放页"
+      :style="capsuleStyle"
       @click="openPlayerPage"
       @keydown.enter="openPlayerPage"
     >
@@ -478,6 +557,79 @@ function openPlayerPage(): void {
   .lsd-capsule {
     bottom: calc(21px + var(--sab, 0px));
   }
+}
+
+/* ==================== 超大屏（平板 / 电视）横屏：整组纵向居中 ====================
+   常规手机横屏保持「导航贴顶、封面在左下角」的原布局；
+   屏宽 ≥ 1024px 时，导航胶囊 + 圆形封面作为一组固定在屏幕纵向中间，
+   不再贴顶/贴底，超宽超高的屏幕上也不会出现控制栏「缩在角落」的观感。 */
+@media (orientation: landscape) and (min-width: 1024px) {
+  .lsd {
+    justify-content: center;
+    gap: 18px;
+    padding-top: 16px;
+    padding-bottom: calc(16px + var(--sab, 0px));
+  }
+
+  .lsd-spacer {
+    display: none;
+  }
+}
+
+/* ==================== 安卓电视：放大导航坞，配合遥控器焦点框 ====================
+   电视观看距离 2~3 米且没有触摸屏，按钮需要比手机更大、间距更宽。 */
+html.tv-mode .lsd {
+  --lsd-btn: clamp(44px, calc((100vh - 280px) / 6), 72px);
+  width: calc(118px + var(--sal, 0px));
+  justify-content: center;
+  gap: 22px;
+  padding-top: 16px;
+  padding-bottom: calc(16px + var(--sab, 0px));
+}
+
+html.tv-mode .lsd-spacer {
+  display: none;
+}
+
+html.tv-mode .lsd-nav {
+  gap: 8px;
+  padding: 10px 8px;
+}
+
+html.tv-mode .lsd-cover,
+html.tv-mode .lsd-cover-art {
+  width: 72px;
+  height: 72px;
+}
+
+html.tv-mode .lsd-capsule {
+  left: calc(118px + var(--sal, 0px));
+  height: 76px;
+  border-radius: 38px;
+}
+
+html.tv-mode .lsd-capsule.open {
+  width: min(460px, calc(100vw - 118px - var(--sal, 0px) - 20px));
+}
+
+html.tv-mode .lsd-cap-art {
+  width: 56px;
+  height: 56px;
+  margin-left: 10px;
+}
+
+html.tv-mode .lsd-cap-title {
+  font-size: 19px;
+}
+
+html.tv-mode .lsd-cap-sub {
+  font-size: 13px;
+}
+
+html.tv-mode .lsd-cap-btn {
+  width: 48px;
+  height: 48px;
+  font-size: 26px;
 }
 
 @media (prefers-reduced-motion: reduce) {

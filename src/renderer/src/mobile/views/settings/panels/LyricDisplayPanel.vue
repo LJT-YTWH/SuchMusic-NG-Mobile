@@ -2,7 +2,7 @@
 import { NSwitch, NSlider, useMessage, useDialog } from 'naive-ui'
 import { useSettingsStore } from '../../../../stores/settingsStore'
 
-// 播放页歌词展示：颜色、排版与恢复默认
+// 播放页界面设置：歌词排版/颜色 + 歌名・歌手字号 + 恢复默认
 const settingsStore = useSettingsStore()
 const message = useMessage()
 const dialog = useDialog()
@@ -29,7 +29,7 @@ const subColor = colorProxy('subColor', '#999999')
 function restoreDefaults(): void {
   dialog.warning({
     title: '恢复默认',
-    content: '确定将播放页歌词展示的全部设置恢复为默认吗？',
+    content: '确定将播放页界面设置的全部设置恢复为默认吗？',
     positiveText: '恢复默认',
     negativeText: '取消',
     onPositiveClick: () => {
@@ -42,15 +42,15 @@ function restoreDefaults(): void {
 
 <template>
   <div class="sp-panel">
-    <!-- 排版 -->
-    <div class="mp-section-title">排版</div>
+    <!-- 歌词排版 -->
+    <div class="mp-section-title">歌词排版</div>
     <div class="mp-list setting-list">
       <div class="slider-row">
         <span class="row-label">字号</span>
         <n-slider
           :value="ld.fontSize"
-          :min="14"
-          :max="32"
+          :min="12"
+          :max="72"
           class="row-slider"
           @update:value="ld.fontSize = $event"
         />
@@ -60,8 +60,8 @@ function restoreDefaults(): void {
         <span class="row-label">行距</span>
         <n-slider
           :value="ld.lineHeight"
-          :min="1.2"
-          :max="2.2"
+          :min="1"
+          :max="3"
           :step="0.05"
           class="row-slider"
           @update:value="ld.lineHeight = $event"
@@ -90,6 +90,33 @@ function restoreDefaults(): void {
       <div class="setting-row">
         <span class="row-label">显示翻译</span>
         <n-switch :value="ld.showTranslation" @update:value="ld.showTranslation = $event" />
+      </div>
+    </div>
+
+    <!-- 歌名与歌手（播放页顶部信息区） -->
+    <div class="mp-section-title">歌名与歌手</div>
+    <div class="mp-list setting-list">
+      <div class="slider-row">
+        <span class="row-label">歌名字号</span>
+        <n-slider
+          :value="ld.titleFontSize"
+          :min="12"
+          :max="56"
+          class="row-slider"
+          @update:value="ld.titleFontSize = $event"
+        />
+        <span class="row-value">{{ ld.titleFontSize }}px</span>
+      </div>
+      <div class="slider-row">
+        <span class="row-label">歌手字号</span>
+        <n-slider
+          :value="ld.artistFontSize"
+          :min="10"
+          :max="40"
+          class="row-slider"
+          @update:value="ld.artistFontSize = $event"
+        />
+        <span class="row-value">{{ ld.artistFontSize }}px</span>
       </div>
     </div>
 
@@ -141,6 +168,6 @@ function restoreDefaults(): void {
         <i class="mgc_arrow_right_line row-arrow"></i>
       </div>
     </div>
-    <div class="tip">设置实时生效，可在播放页歌词区域查看效果。</div>
+    <div class="tip">设置实时生效，可在播放页歌词与顶部歌名区域查看效果；字号、行距均为播放页基准值。</div>
   </div>
 </template>

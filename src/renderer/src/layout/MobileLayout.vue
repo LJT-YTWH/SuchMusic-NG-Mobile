@@ -29,6 +29,9 @@ onMounted(() => {
   // 安卓返回键 / 侧边返回手势：播放页优先收起，其次路由后退，首页则最小化保持后台播放
   if (Capacitor.isNativePlatform()) {
     void App.addListener('backButton', () => {
+      // 先让页面内的浮层（横屏音乐控制胶囊等）自行处理：调用 preventDefault 表示已消费
+      const consumed = !window.dispatchEvent(new CustomEvent('mobile:back', { cancelable: true }))
+      if (consumed) return
       if (player.isPlayerPageShown) {
         player.setPlayerPageShown(false)
         return

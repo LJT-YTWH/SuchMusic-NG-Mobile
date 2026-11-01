@@ -3,6 +3,8 @@ package com.suchmusic.app;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.os.Bundle;
+import android.view.KeyEvent;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
 
 import androidx.annotation.NonNull;
@@ -21,6 +23,12 @@ import com.suchmusic.app.plugins.SuchLocalMusicPlugin;
 
 public class MainActivity extends BridgeActivity {
 
+    /**
+     * 是否运行在电视设备上（Android TV / Google TV / 电视盒子）。
+     * 电视没有触摸屏，交互全靠遥控器方向键 + OK + 返回，Web 端据此启用空间导航。
+     */
+    private boolean isTelevision = false;
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         // 注册自定义原生插件
@@ -30,6 +38,20 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(AppPrefsPlugin.class);
         registerPlugin(FileExportPlugin.class);
         super.onCreate(savedInstanceState);
+        // 电视环境识别（uiMode 由系统根据设备类型给出，比 UA 判断更可靠）
+        isTelevision = (getResources().getConfiguration().uiMode
+                & Configuration.UI_MODE_TYPE_MASK) == Configuration.UI_MODE_TYPE_TELEVISION;
+        WebView bridgeView = getBridge() != null ? getBridge().getWebView() : null;
+        if (bridgeView != null) {
+            // 暴露给 Web 端：window.SuchTvInfo.isTv()
+            bridgeView.addJavascriptInterface(new TvInfoBridge(), "SuchTvInfo");
+            if (isTelevision) {
+                // 遥控器方向键必须落在 WebView 上才能变成 DOM 键盘事件
+                bridgeView.setFocusable(true);
+                bridgeView.setFocusableInTouchMode(true);
+                bridgeView.setBackgroundColor(Color.BLACK);
+            }
+        }
         // 沉浸式：WebView 内容延伸到状态栏与导航栏区域，系统栏全透明
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         getWindow().setStatusBarColor(Color.TRANSPARENT);
@@ -61,6 +83,66 @@ public class MainActivity extends BridgeActivity {
                 ViewCompat.requestApplyInsets(getWindow().getDecorView()));
         // 横屏自动隐藏状态栏（粘性沉浸）
         getWindow().getDecorView().post(this::applySystemBarsForOrientation);
+        // 电视：首帧后把焦点交给 WebView，否则遥控器方向键会被 DecorView 吞掉
+        if (isTelevision) {
+            getWindow().getDecorView().post(this::requestWebViewFocus);
+        }
+    }
+
+    /** 把输入焦点交给 WebView（电视遥控器方向键依赖它） */
+    private void requestWebViewFocus() {
+        WebView webView = getBridge() != null ? getBridge().getWebView() : null;
+        if (webView == null) return;
+        webView.setFocusable(true);
+        webView.setFocusableInTouchMode(true);
+        if (!webView.hasFocus()) webView.requestFocus();
+    }
+
+    /**
+     * 遥控器媒体键（播放/暂停、上一首、下一首）转给 Web 端的播放器。
+     * 其它按键（方向键、返回键、OK）保持系统默认流转：
+     * 方向键/OK 由 WebView 转成 DOM 键盘事件交给空间导航，返回键走 onBackPressed 的既有逻辑。
+     */
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (isTelevision && event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+            String action = mediaActionForKey(event.getKeyCode());
+            if (action != null && dispatchMediaActionToWeb(action)) return true;
+        }
+        return super.dispatchKeyEvent(event);
+    }
+
+    private String mediaActionForKey(int keyCode) {
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
+                return "toggle";
+            case KeyEvent.KEYCODE_MEDIA_PLAY:
+                return "play";
+            case KeyEvent.KEYCODE_MEDIA_PAUSE:
+                return "pause";
+            case KeyEvent.KEYCODE_MEDIA_NEXT:
+                return "next";
+            case KeyEvent.KEYCODE_MEDIA_PREVIOUS:
+                return "prev";
+            default:
+                return null;
+        }
+    }
+
+    private boolean dispatchMediaActionToWeb(String action) {
+        WebView webView = getBridge() != null ? getBridge().getWebView() : null;
+        if (webView == null) return false;
+        String js = "try{window.dispatchEvent(new CustomEvent('tv:media',{detail:'" + action + "'}));}catch(e){}";
+        webView.evaluateJavascript(js, null);
+        return true;
+    }
+
+    /** 暴露给 Web 端的电视环境信息：window.SuchTvInfo.isTv() */
+    public class TvInfoBridge {
+        @JavascriptInterface
+        public boolean isTv() {
+            return isTelevision;
+        }
     }
 
     /**
@@ -94,6 +176,7 @@ public class MainActivity extends BridgeActivity {
         // 重回前台时重新应用，防止系统恢复状态栏
         if (hasFocus) {
             applySystemBarsForOrientation();
+            if (isTelevision) requestWebViewFocus();
         }
     }
 

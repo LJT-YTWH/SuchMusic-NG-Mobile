@@ -30,8 +30,8 @@ export const settingsGroups: SettingsGroup[] = [
       },
       {
         key: 'lyricDisplay',
-        label: '播放页歌词展示',
-        sub: '歌词颜色与排版',
+        label: '播放页界面设置',
+        sub: '歌词排版、歌名与歌手字号',
         icon: 'mgc_quill_pen_line',
         gradient: 'linear-gradient(135deg, #64d2ff 0%, #0a84ff 100%)'
       },

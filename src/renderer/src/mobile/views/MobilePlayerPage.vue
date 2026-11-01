@@ -254,7 +254,7 @@ watch(
   }
 )
 
-// 「播放页歌词展示」设置 → CSS 变量（作用于歌词舞台与迷你歌词）
+// 「播放页界面设置」设置 → CSS 变量（作用于歌词舞台与迷你歌词）
 const lyricVars = computed(() => {
   const ld = settingsStore.lyricDisplay
   const vars: Record<string, string> = {
@@ -268,6 +268,15 @@ const lyricVars = computed(() => {
   if (ld.activeColor) vars['--lyric-active-color'] = ld.activeColor
   if (ld.subColor) vars['--lyric-sub-color'] = ld.subColor
   return vars
+})
+
+// 歌名 / 歌手字号：作用于整页（顶部信息区），横屏在 CSS 里按比例缩放
+const pageVars = computed(() => {
+  const ld = settingsStore.lyricDisplay
+  return {
+    '--song-title-size': `${ld.titleFontSize || 20}px`,
+    '--song-artist-size': `${ld.artistFontSize || 14}px`
+  }
 })
 
 // AI 翻译自动套用令牌：防止切歌后旧请求把译文写到新歌曲上
@@ -1308,7 +1317,7 @@ watch(
       :key="pageKey"
       class="player-page"
       :class="{ closing, 'is-open': pageOpened, dragging: gestureAxis === 'v' }"
-      :style="pageStyle"
+      :style="[pageStyle, pageVars]"
       @touchstart.passive="onTouchStart"
       @touchmove.passive="onTouchMove"
       @touchend="onTouchEnd"
@@ -2307,7 +2316,7 @@ watch(
 
 .song-title {
   color: #fff;
-  font-size: 20px;
+  font-size: var(--song-title-size, 20px);
   font-weight: 700;
   line-height: 1.3;
   white-space: nowrap;
@@ -2318,7 +2327,7 @@ watch(
 
 .song-artist {
   color: rgba(255, 255, 255, 0.72);
-  font-size: 13.5px;
+  font-size: var(--song-artist-size, 14px);
   margin-top: 3px;
   white-space: nowrap;
   overflow: hidden;
@@ -2977,12 +2986,13 @@ watch(
     padding-top: 0;
   }
 
+  /* 横屏空间有限，字号设置按比例收敛：歌名 ×0.85 ≈ 17px、歌手 ×0.9 ≈ 12.5px */
   .song-title {
-    font-size: 17px;
+    font-size: calc(var(--song-title-size, 20px) * 0.85);
   }
 
   .song-artist {
-    font-size: 12.5px;
+    font-size: calc(var(--song-artist-size, 14px) * 0.9);
   }
 
   /* 拆开轮播容器，封面面板成为 grid 子项（左封面、右歌词） */

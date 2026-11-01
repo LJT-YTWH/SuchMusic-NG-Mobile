@@ -23,7 +23,7 @@ export const settingsPanels: Record<string, Component> = {
 export const settingsTitles: Record<string, string> = {
   appearance: '外观',
   playback: '播放',
-  lyricDisplay: '播放页歌词展示',
+  lyricDisplay: '播放页界面设置',
   lyrics: '悬浮歌词',
   preference: '偏好',
   source: '音源与插件',

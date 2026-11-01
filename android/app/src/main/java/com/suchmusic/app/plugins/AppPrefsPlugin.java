@@ -1,6 +1,7 @@
 package com.suchmusic.app.plugins;
 
 import android.content.pm.ActivityInfo;
+import android.content.res.Configuration;
 
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -17,7 +18,7 @@ public class AppPrefsPlugin extends Plugin {
     @PluginMethod
     public void setOrientation(PluginCall call) {
         String mode = call.getString("mode", "auto");
-        final int orientation;
+        int orientation;
         switch (mode != null ? mode : "auto") {
             case "portrait":
                 orientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT;
@@ -30,8 +31,14 @@ public class AppPrefsPlugin extends Plugin {
                 orientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
                 break;
         }
+        // 电视（Android TV / 电视盒子）没有竖屏形态，无论设置为何都保持横屏
+        if ((getActivity().getResources().getConfiguration().uiMode
+                & Configuration.UI_MODE_TYPE_MASK) == Configuration.UI_MODE_TYPE_TELEVISION) {
+            orientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE;
+        }
+        final int requested = orientation;
         getActivity().runOnUiThread(() -> {
-            getActivity().setRequestedOrientation(orientation);
+            getActivity().setRequestedOrientation(requested);
             call.resolve();
         });
     }

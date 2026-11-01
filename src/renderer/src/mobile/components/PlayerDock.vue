@@ -119,9 +119,17 @@ const onKeydown = (event: KeyboardEvent): void => {
   if (event.key === 'Escape' && panelOpen.value) closePanel()
 }
 
+// 安卓返回键：面板展开时先收起面板，而不是直接后退/退出
+const onBack = (event: Event): void => {
+  if (!panelOpen.value) return
+  event.preventDefault()
+  closePanel()
+}
+
 onMounted(() => {
   document.addEventListener('pointerdown', onDocPointerDown, true)
   document.addEventListener('keydown', onKeydown)
+  window.addEventListener('mobile:back', onBack)
 })
 
 // 路由切换时收起面板，避免悬浮面板停在旧页面上（显式导航，强制关闭）
@@ -130,6 +138,7 @@ const removeRouteHook = router.afterEach(() => closePanel(true))
 onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', onDocPointerDown, true)
   document.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('mobile:back', onBack)
   removeRouteHook()
 })
 </script>

@@ -116,10 +116,14 @@ export const DEFAULT_ADVANCED_FX: AdvancedFxSettings = {
   confirmed: false
 }
 
-/** 播放页歌词展示设置（恢复默认时回到 DEFAULT_LYRIC_DISPLAY） */
+/** 播放页界面设置（歌词排版 + 歌名/歌手字号，恢复默认时回到 DEFAULT_LYRIC_DISPLAY） */
 export interface LyricDisplaySettings {
-  /** 基准字号 px */
+  /** 歌词基准字号 px */
   fontSize: number
+  /** 播放页歌名字号 px */
+  titleFontSize: number
+  /** 播放页歌手字号 px */
+  artistFontSize: number
   /** 普通歌词颜色（空串 = 默认白） */
   color: string
   /** 高亮（当前行）颜色（空串 = 默认） */
@@ -140,6 +144,8 @@ export interface LyricDisplaySettings {
 
 export const DEFAULT_LYRIC_DISPLAY: LyricDisplaySettings = {
   fontSize: 20,
+  titleFontSize: 20,
+  artistFontSize: 14,
   color: '',
   activeColor: '',
   subColor: '',
@@ -250,7 +256,7 @@ export const useSettingsStore = defineStore('settings', () => {
   // 逐字歌词设置
   const karaoke = ref<KaraokeSettings>({ ...DEFAULT_KARAOKE })
 
-  // 恢复播放页歌词展示为默认设置（原地更新，保持对象引用不变）
+  // 恢复播放页界面设置为默认设置（原地更新，保持对象引用不变）
   const resetLyricDisplay = () => {
     Object.assign(lyricDisplay.value, DEFAULT_LYRIC_DISPLAY)
   }

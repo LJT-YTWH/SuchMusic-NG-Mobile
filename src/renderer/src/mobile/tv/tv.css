@@ -1,0 +1,43 @@
+/* ============================================================
+   安卓电视 / 遥控器样式
+   仅在识别到电视环境（<html class="tv-mode">）时生效，
+   手机 / 平板完全不受影响。
+   ============================================================ */
+
+/* ==================== 焦点框 ====================
+   电视观看距离通常 2~3 米，焦点必须足够醒目：
+   3px 主题色描边 + 外扩光晕，不改变元素布局（outline 不占位）。 */
+html.tv-mode body.is-mobile :focus {
+  outline: 3px solid var(--mp-primary, #2c8efd) !important;
+  outline-offset: 4px !important;
+  box-shadow: 0 0 0 7px color-mix(in srgb, var(--mp-primary, #2c8efd) 22%, transparent) !important;
+}
+
+/* 文本输入框：描边贴边一点，避免遮住输入内容 */
+html.tv-mode body.is-mobile input:focus,
+html.tv-mode body.is-mobile textarea:focus {
+  outline-offset: 1px !important;
+}
+
+/* 焦点元素需要盖住相邻元素的光晕，避免被裁掉 */
+html.tv-mode body.is-mobile .mp-list > :focus,
+html.tv-mode body.is-mobile .mp-scroll > :focus {
+  position: relative;
+  z-index: 2;
+}
+
+/* 电视端隐藏滚动条（遥控器不依赖滚动条位置） */
+html.tv-mode body.is-mobile .mp-scroll,
+html.tv-mode body.is-mobile ::-webkit-scrollbar {
+  scrollbar-width: none;
+}
+
+html.tv-mode body.is-mobile ::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/* 焦点进入长列表时保持平滑滚动，避免跨屏跳动 */
+html.tv-mode body.is-mobile .mp-scroll {
+  scroll-behavior: smooth;
+}
